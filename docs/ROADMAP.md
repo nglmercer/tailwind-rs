@@ -1,0 +1,134 @@
+# Roadmap
+
+The roadmap is organized around compiler risk, not marketing features.
+
+## Phase 0 — Foundation
+
+Goal: establish workspace, architecture, invariants, CI, benchmarks, and minimal IR.
+
+Exit criteria:
+
+- Cargo workspace exists.
+- Core dependency direction is enforced.
+- Formatting/lint/test CI passes.
+- Benchmark harness exists.
+- Error type and source span conventions exist.
+
+See `roadmap/PHASE_0_FOUNDATION.md`.
+
+## Phase 1 — Scanner + DSL parser
+
+Goal: reliably discover and parse static utility candidates.
+
+Exit criteria:
+
+- text scanner works on representative HTML/JSX/TSX/Vue/Svelte-like input,
+- escape rules are defined,
+- candidate AST is stable enough for semantic work,
+- fuzzing exists for parser/scanner boundaries.
+
+See `roadmap/PHASE_1_SCANNER_PARSER.md`.
+
+## Phase 2 — Utility compiler
+
+Goal: compile a useful utility subset to deterministic CSS.
+
+Initial families:
+
+- display,
+- spacing,
+- sizing,
+- color,
+- border radius,
+- typography subset,
+- grid/flex subset.
+
+Exit criteria:
+
+- theme resolution works,
+- deterministic ordering works,
+- arbitrary values work for approved grammars,
+- utility registry API is established.
+
+See `roadmap/PHASE_2_UTILITY_COMPILER.md`.
+
+## Phase 3 — Variants + incremental engine
+
+Goal: support state/responsive variants and fast rebuilds.
+
+Initial variants:
+
+- hover,
+- focus,
+- active,
+- disabled,
+- dark,
+- responsive breakpoints,
+- group/peer subset.
+
+Exit criteria:
+
+- variant composition rules are specified,
+- file-to-candidate diffing works,
+- unchanged candidates are not recompiled,
+- watch benchmark suite exists.
+
+See `roadmap/PHASE_3_VARIANTS_INCREMENTAL.md`.
+
+## Phase 4 — Native CLI + JS bindings
+
+Goal: expose stable compiler behavior to native and JS runtimes.
+
+Deliverables:
+
+- CLI,
+- N-API package for Node/Bun,
+- WASM package where useful,
+- stable serialization protocol.
+
+See `roadmap/PHASE_4_BINDINGS_CLI.md`.
+
+## Phase 5 — Vite + runtime adapters
+
+Goal: make integration excellent.
+
+Deliverables:
+
+- Vite plugin,
+- Node API,
+- Bun-tested compatibility,
+- Deno integration path,
+- file invalidation bridge,
+- dev/prod behavior parity.
+
+See `roadmap/PHASE_5_ADAPTERS.md`.
+
+## Phase 6 — Smart extraction + ecosystem
+
+Goal: add optional AST-assisted extraction and extension points.
+
+Deliverables may include:
+
+- SWC-assisted extractor,
+- framework-specific extractors,
+- plugin API,
+- IDE/LSP services,
+- compatibility presets.
+
+See `roadmap/PHASE_6_ECOSYSTEM.md`.
+
+## Release milestones
+
+Suggested:
+
+- `0.1` — scanner/parser experimental,
+- `0.2` — basic utilities,
+- `0.3` — variants + incremental,
+- `0.4` — CLI/bindings,
+- `0.5` — Vite integration,
+- `0.6+` — ecosystem hardening,
+- `1.0` — grammar/API stability commitment.
+
+## Feature gate policy
+
+Experimental behavior should be behind explicit feature flags or unstable APIs until its semantics are documented.

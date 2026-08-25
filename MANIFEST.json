@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "project": "Rust Utility CSS Compiler",
+  "working_package_name": "utilitycss",
+  "status": "documentation-only",
+  "description": "Design and implementation documentation for a runtime-agnostic utility CSS compiler platform in Rust.",
+  "manifest_scope": {
+    "root": ".",
+    "path_format": "POSIX-style relative paths",
+    "excludes": [
+      "MANIFEST.json"
+    ]
+  },
+  "file_count": 33,
+  "files": [
+    "AGENTS.md",
+    "LLMS.md",
+    "README.md",
+    "docs/ADAPTERS.md",
+    "docs/API_DESIGN.md",
+    "docs/ARCHITECTURE.md",
+    "docs/CLASS_DSL_SPEC.md",
+    "docs/CODE_STYLE.md",
+    "docs/COMPATIBILITY.md",
+    "docs/COMPILER_PIPELINE.md",
+    "docs/CONFIGURATION.md",
+    "docs/CONTRIBUTING.md",
+    "docs/CRATE_LAYOUT.md",
+    "docs/DECISIONS.md",
+    "docs/GLOSSARY.md",
+    "docs/OBSERVABILITY.md",
+    "docs/PERFORMANCE.md",
+    "docs/RELEASE.md",
+    "docs/ROADMAP.md",
+    "docs/SECURITY.md",
+    "docs/SPECS.md",
+    "docs/TESTING.md",
+    "docs/VISION.md",
+    "docs/roadmap/PHASE_0_FOUNDATION.md",
+    "docs/roadmap/PHASE_1_SCANNER_PARSER.md",
+    "docs/roadmap/PHASE_2_UTILITY_COMPILER.md",
+    "docs/roadmap/PHASE_3_VARIANTS_INCREMENTAL.md",
+    "docs/roadmap/PHASE_4_BINDINGS_CLI.md",
+    "docs/roadmap/PHASE_5_ADAPTERS.md",
+    "docs/roadmap/PHASE_6_ECOSYSTEM.md",
+    "docs/templates/ADR_TEMPLATE.md",
+    "docs/templates/PR_CHECKLIST.md",
+    "docs/templates/RFC_TEMPLATE.md"
+  ]
+}

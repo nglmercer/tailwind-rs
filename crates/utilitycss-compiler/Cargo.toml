@@ -1,0 +1,19 @@
+[package]
+name = "utilitycss-compiler"
+description = "Runtime-independent compiler facade for utilitycss."
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+utilitycss-css-ir = { path = "../utilitycss-css-ir" }
+utilitycss-diagnostics = { path = "../utilitycss-diagnostics" }
+utilitycss-scanner = { path = "../utilitycss-scanner" }
+utilitycss-span = { path = "../utilitycss-span" }
+utilitycss-syntax = { path = "../utilitycss-syntax" }
+utilitycss-theme = { path = "../utilitycss-theme" }
+utilitycss-utilities = { path = "../utilitycss-utilities" }
+utilitycss-variants = { path = "../utilitycss-variants" }
+
+[lints]
+workspace = true

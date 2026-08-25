@@ -1,0 +1,9 @@
+[package]
+name = "utilitycss-css-ir"
+description = "Minimal deterministic CSS intermediate representation for utilitycss."
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,166 @@
+//! Thin N-API transport bindings over the runtime-independent compiler facade.
+
+// The N-API proc macro emits its own unsafe FFI glue and locally allows that generated code.
+// This crate contains no handwritten unsafe blocks.
+#![deny(unsafe_code)]
+#![deny(missing_docs)]
+
+use napi::{Error, Result, Status};
+use napi_derive::napi;
+use utilitycss_compiler::{CandidateInput, Compiler as CoreCompiler, CompilerConfig, SourceInput};
+use utilitycss_css_ir::CssSerializationMode;
+use utilitycss_span::{SourceId, Span};
+
+/// A diagnostic returned across the N-API boundary.
+#[napi(object)]
+pub struct JsDiagnostic {
+    /// Stable diagnostic code.
+    pub code: String,
+    /// Human-readable diagnostic message.
+    pub message: String,
+    /// Optional source identity.
+    pub source: Option<String>,
+    /// Optional start byte offset.
+    pub start: Option<u32>,
+    /// Optional exclusive end byte offset.
+    pub end: Option<u32>,
+}
+
+/// A statically extracted candidate accepted by the batched source update API.
+#[napi(object)]
+pub struct JsCandidate {
+    /// Candidate text, which MUST match the source span exactly.
+    pub raw: String,
+    /// Inclusive start byte offset.
+    pub start: u32,
+    /// Exclusive end byte offset.
+    pub end: u32,
+}
+
+/// Build counters returned across the N-API boundary.
+#[napi(object)]
+pub struct JsStats {
+    /// Number of source units scanned on updates.
+    pub sources_scanned: u32,
+    /// Number of source bytes scanned on updates.
+    pub bytes_scanned: u32,
+    /// Number of candidate occurrences found on updates.
+    pub candidates_found: u32,
+    /// Number of unique active candidates.
+    pub unique_candidates: u32,
+    /// Number of candidates parsed on this build.
+    pub candidates_parsed: u32,
+    /// Number of active candidates served from cache.
+    pub cache_hits: u32,
+    /// Number of active rules emitted.
+    pub rules_generated: u32,
+    /// Number of rules removed from active references.
+    pub rules_removed: u32,
+}
+
+/// A compiler build result returned to JavaScript.
+#[napi(object)]
+pub struct JsBuildResult {
+    /// Serialized CSS output.
+    pub css: String,
+    /// Structured compiler diagnostics.
+    pub diagnostics: Vec<JsDiagnostic>,
+    /// Work counters for this build.
+    pub stats: JsStats,
+}
+
+/// A reusable JavaScript-facing compiler instance.
+#[napi]
+pub struct Compiler {
+    inner: CoreCompiler,
+}
+
+#[napi]
+impl Compiler {
+    /// Creates a compiler, optionally selecting readable CSS output.
+    #[napi(constructor)]
+    pub fn new(pretty: Option<bool>) -> Self {
+        let mode = if pretty.unwrap_or(false) {
+            CssSerializationMode::Pretty
+        } else {
+            CssSerializationMode::Minified
+        };
+        Self { inner: CoreCompiler::new(CompilerConfig::new().with_serialization_mode(mode)) }
+    }
+
+    /// Inserts or replaces one source unit.
+    #[napi]
+    pub fn update_source(
+        &mut self,
+        id: String,
+        content: String,
+        path: Option<String>,
+        candidates: Option<Vec<JsCandidate>>,
+    ) -> Result<()> {
+        let source_id = SourceId::new(id);
+        let source = match path {
+            Some(path) => SourceInput::new(source_id, content).with_path(path),
+            None => SourceInput::new(source_id, content),
+        };
+        if let Some(candidates) = candidates {
+            let candidates = candidates
+                .into_iter()
+                .map(|candidate| {
+                    let span = Span::new(candidate.start, candidate.end).ok_or_else(|| {
+                        Error::new(Status::InvalidArg, "candidate span is not ordered")
+                    })?;
+                    Ok(CandidateInput::new(candidate.raw, span))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            self.inner
+                .update_source_with_candidates(source, candidates)
+                .map_err(|error| Error::new(Status::InvalidArg, error.to_string()))
+        } else {
+            self.inner
+                .update_source(source)
+                .map_err(|error| Error::new(Status::InvalidArg, error.to_string()))
+        }
+    }
+
+    /// Removes one source unit and returns whether it existed.
+    #[napi]
+    pub fn remove_source(&mut self, id: String) -> bool {
+        self.inner.remove_source(&SourceId::new(id))
+    }
+
+    /// Builds the current sources and returns CSS, diagnostics, and counters.
+    #[napi]
+    pub fn build(&mut self) -> JsBuildResult {
+        let output = self.inner.build();
+        let diagnostics = output
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| JsDiagnostic {
+                code: diagnostic.code().to_string(),
+                message: diagnostic.message().to_owned(),
+                source: diagnostic.source().map(ToString::to_string),
+                start: diagnostic.span().map(|span| span.start()),
+                end: diagnostic.span().map(|span| span.end()),
+            })
+            .collect();
+        let stats = output.stats();
+        JsBuildResult {
+            css: output.css().to_owned(),
+            diagnostics,
+            stats: JsStats {
+                sources_scanned: saturating_u32(stats.sources_scanned()),
+                bytes_scanned: saturating_u32(stats.bytes_scanned()),
+                candidates_found: saturating_u32(stats.candidates_found()),
+                unique_candidates: saturating_u32(stats.unique_candidates()),
+                candidates_parsed: saturating_u32(stats.candidates_parsed()),
+                cache_hits: saturating_u32(stats.cache_hits()),
+                rules_generated: saturating_u32(stats.rules_generated()),
+                rules_removed: saturating_u32(stats.rules_removed()),
+            },
+        }
+    }
+}
+
+fn saturating_u32(value: usize) -> u32 {
+    u32::try_from(value).unwrap_or(u32::MAX)
+}

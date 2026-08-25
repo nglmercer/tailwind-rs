@@ -6,6 +6,11 @@ Expand capabilities without compromising the simple compiler core.
 
 ## SWC smart extractor
 
+The first increment is a dependency-free static extractor for quoted class attributes and known
+class helper calls. It feeds candidate text and spans toward the same compiler pipeline and does
+not evaluate expressions. A full SWC AST adapter remains optional until its dependency and
+version-isolation costs are justified.
+
 Potentially understand:
 
 ```tsx

@@ -1,0 +1,16 @@
+[package]
+name = "utilitycss-protocol"
+description = "Versioned JSON transport protocol for utilitycss compiler hosts."
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+utilitycss-compiler = { path = "../utilitycss-compiler" }
+utilitycss-css-ir = { path = "../utilitycss-css-ir" }
+utilitycss-span = { path = "../utilitycss-span" }
+
+[lints]
+workspace = true

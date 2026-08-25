@@ -7,6 +7,7 @@ crates/
   utilitycss-span/
   utilitycss-diagnostics/
   utilitycss-scanner/
+  utilitycss-extractor/
   utilitycss-syntax/
   utilitycss-theme/
   utilitycss-css-ir/
@@ -17,6 +18,7 @@ crates/
   utilitycss-cli/
   utilitycss-napi/
   utilitycss-wasm/
+  utilitycss-protocol/
   utilitycss-swc/
   utilitycss-bench/
 ```
@@ -50,6 +52,11 @@ No theme or CSS dependencies.
 Class DSL parser and AST.
 
 No filesystem or JS runtime dependencies.
+
+### `utilitycss-extractor`
+
+Conservative static extraction for quoted class attributes and known class helper calls. It may
+depend on the scanner and span crates, but MUST NOT evaluate user code or own CSS semantics.
 
 ### `utilitycss-theme`
 
@@ -92,6 +99,11 @@ No compiler semantics.
 ### `utilitycss-wasm`
 
 WASM bindings for Deno/browser-compatible hosts when justified.
+
+### `utilitycss-protocol`
+
+Versioned plain-data request/response messages for external hosts. It may depend on the compiler
+facade, but MUST NOT expose internal AST or CSS IR implementation details.
 
 ### `utilitycss-swc`
 

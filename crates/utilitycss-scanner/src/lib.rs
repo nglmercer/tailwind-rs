@@ -1,0 +1,195 @@
+//! A language-agnostic text scanner for possible utility class candidates.
+//!
+//! The scanner deliberately over-collects. It does not know themes, utilities, or host-language
+//! syntax; those concerns belong to parsing and semantic resolution.
+
+#![forbid(unsafe_code)]
+#![deny(missing_docs)]
+
+use utilitycss_span::Span;
+
+/// A borrowed candidate token and its byte span in the scanned source.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CandidateToken<'source> {
+    raw: &'source str,
+    span: Span,
+}
+
+impl<'source> CandidateToken<'source> {
+    /// Creates a token from a source slice and an already validated span.
+    #[must_use]
+    pub const fn new(raw: &'source str, span: Span) -> Self {
+        Self { raw, span }
+    }
+
+    /// Returns the candidate text exactly as it appeared in the source.
+    #[must_use]
+    pub const fn raw(self) -> &'source str {
+        self.raw
+    }
+
+    /// Returns the candidate's byte span in the scanned source.
+    #[must_use]
+    pub const fn span(self) -> Span {
+        self.span
+    }
+}
+
+/// Scans source text for possible utility candidates.
+///
+/// Candidate discovery is linear in the number of source bytes. Bracketed arbitrary values may
+/// contain whitespace and nested brackets; an unterminated bracket consumes the remainder of the
+/// source and is left for the parser to diagnose.
+#[must_use]
+pub fn scan(source: &str) -> Vec<CandidateToken<'_>> {
+    let mut tokens = Vec::new();
+    let mut cursor = 0;
+
+    while cursor < source.len() {
+        let character = source[cursor..]
+            .chars()
+            .next()
+            .expect("cursor always points at a valid UTF-8 boundary");
+        if is_candidate_start(character) {
+            let end = scan_candidate_end(source, cursor);
+            let raw = &source[cursor..end];
+            if raw.chars().any(char::is_alphanumeric) {
+                let span = Span::new(
+                    u32::try_from(cursor).unwrap_or(u32::MAX),
+                    u32::try_from(end).unwrap_or(u32::MAX),
+                )
+                .expect("scanner end is never before scanner start");
+                tokens.push(CandidateToken::new(raw, span));
+            }
+            cursor = end;
+        } else {
+            cursor += character.len_utf8();
+        }
+    }
+
+    tokens
+}
+
+fn scan_candidate_end(source: &str, start: usize) -> usize {
+    let mut cursor = start;
+    let mut bracket_depth = 0_u32;
+    let mut escaped = false;
+    let mut quote = None;
+
+    while cursor < source.len() {
+        let character = source[cursor..]
+            .chars()
+            .next()
+            .expect("cursor always points at a valid UTF-8 boundary");
+
+        if escaped {
+            escaped = false;
+            cursor += character.len_utf8();
+            continue;
+        }
+
+        if character == '\\' {
+            escaped = true;
+            cursor += character.len_utf8();
+            continue;
+        }
+
+        if let Some(quote_character) = quote {
+            if character == quote_character {
+                quote = None;
+            }
+            cursor += character.len_utf8();
+            continue;
+        }
+
+        if bracket_depth > 0 {
+            match character {
+                '[' => bracket_depth = bracket_depth.saturating_add(1),
+                ']' => bracket_depth = bracket_depth.saturating_sub(1),
+                '\'' | '"' => quote = Some(character),
+                _ => {}
+            }
+            cursor += character.len_utf8();
+            continue;
+        }
+
+        match character {
+            '[' => {
+                bracket_depth = 1;
+                cursor += character.len_utf8();
+            }
+            character if is_candidate_continue(character) => cursor += character.len_utf8(),
+            _ => break,
+        }
+    }
+
+    cursor
+}
+
+fn is_candidate_start(character: char) -> bool {
+    character.is_alphanumeric() || matches!(character, '!' | '-' | '_')
+}
+
+fn is_candidate_continue(character: char) -> bool {
+    character.is_alphanumeric()
+        || matches!(
+            character,
+            '!' | '_' | '-' | ':' | '/' | '.' | '%' | '#' | '=' | '~' | '+' | '*' | '(' | ')' | '@'
+        )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scan;
+
+    fn contains(source: &str, expected: &str) -> bool {
+        scan(source).iter().any(|token| token.raw() == expected)
+    }
+
+    #[test]
+    fn finds_candidates_in_html_jsx_and_template_like_source() {
+        let source = r#"
+            <div class="flex gap-4 p-4">{items.map(item => <span className={`text-${item}`} />)}</div>
+            <Button className="md:grid hover:bg-red-500/50" />
+        "#;
+
+        assert!(contains(source, "flex"));
+        assert!(contains(source, "gap-4"));
+        assert!(contains(source, "p-4"));
+        assert!(contains(source, "md:grid"));
+        assert!(contains(source, "hover:bg-red-500/50"));
+    }
+
+    #[test]
+    fn preserves_unicode_and_arbitrary_value_whitespace() {
+        let source = "class=\"text-élan w-[calc(100% - 2rem)]\"";
+        let tokens = scan(source);
+
+        assert!(contains(source, "text-élan"));
+        assert!(contains(source, "w-[calc(100% - 2rem)]"));
+        assert_eq!(
+            tokens.iter().find(|token| token.raw() == "text-élan").map(|token| token.span().len()),
+            Some(10)
+        );
+    }
+
+    #[test]
+    fn escaped_delimiters_stay_inside_one_candidate() {
+        assert!(contains(r#"class="hover\:bg-red-500""#, r"hover\:bg-red-500"));
+    }
+
+    #[test]
+    fn malformed_brackets_are_collected_without_panicking() {
+        let tokens = scan("class=\"w-[calc(100% - 2rem) p-4\"");
+
+        assert!(tokens.iter().any(|token| token.raw().starts_with("w-[")));
+    }
+
+    #[test]
+    fn long_input_is_scanned_linearly() {
+        let source = format!("class=\"{}\"", "p-4 ".repeat(10_000));
+        let tokens = scan(&source);
+
+        assert_eq!(tokens.iter().filter(|token| token.raw() == "p-4").count(), 10_000);
+    }
+}

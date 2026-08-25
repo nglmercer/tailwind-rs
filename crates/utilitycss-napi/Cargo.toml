@@ -1,0 +1,22 @@
+[package]
+name = "utilitycss-napi"
+description = "Thin N-API binding for the utilitycss compiler facade."
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+napi = { version = "3.12.2", features = ["napi9"] }
+napi-derive = "3.6.3"
+utilitycss-compiler = { path = "../utilitycss-compiler" }
+utilitycss-css-ir = { path = "../utilitycss-css-ir" }
+utilitycss-span = { path = "../utilitycss-span" }
+
+[build-dependencies]
+napi-build = "2.4.1"
+
+[lints]
+workspace = true

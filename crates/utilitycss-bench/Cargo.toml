@@ -1,0 +1,18 @@
+[package]
+name = "utilitycss-bench"
+description = "Dependency-free benchmark harness for utilitycss foundation work."
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+utilitycss-scanner = { path = "../utilitycss-scanner" }
+utilitycss-span = { path = "../utilitycss-span" }
+utilitycss-syntax = { path = "../utilitycss-syntax" }
+
+[[bench]]
+name = "foundation"
+harness = false
+
+[lints]
+workspace = true

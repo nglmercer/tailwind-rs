@@ -1,0 +1,9 @@
+[package]
+name = "utilitycss-theme"
+description = "Typed deterministic theme tokens for utilitycss."
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true

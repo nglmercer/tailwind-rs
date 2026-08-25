@@ -23,16 +23,16 @@ Expected baseline commands once the workspace exists:
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
-cargo test -p utilitycss-core
+cargo test -p utilitycss-compiler
 cargo bench -p utilitycss-bench
 ```
 
-For JavaScript adapter packages:
+For JavaScript adapter packages, npm is the selected package manager:
 
 ```bash
-pnpm lint
-pnpm test
-pnpm typecheck
+npm run lint
+npm test
+npm run typecheck
 ```
 
 Use the repository's actual package manager once chosen.

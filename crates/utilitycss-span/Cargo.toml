@@ -1,0 +1,9 @@
+[package]
+name = "utilitycss-span"
+description = "Source identity and half-open source spans for utilitycss."
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true

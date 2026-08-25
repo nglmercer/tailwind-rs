@@ -1,0 +1,13 @@
+[package]
+name = "utilitycss-syntax"
+description = "Borrowed abstract syntax tree and parser for the utilitycss class DSL."
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+utilitycss-diagnostics = { path = "../utilitycss-diagnostics" }
+utilitycss-span = { path = "../utilitycss-span" }
+
+[lints]
+workspace = true

@@ -1,0 +1,13 @@
+[package]
+name = "utilitycss-extractor"
+description = "Conservative static candidate extraction for common template and class helper syntax."
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+utilitycss-scanner = { path = "../utilitycss-scanner" }
+utilitycss-span = { path = "../utilitycss-span" }
+
+[lints]
+workspace = true

@@ -1,10 +1,10 @@
 # utilitycss
 
-`utilitycss` is a planned, runtime-agnostic utility CSS compiler platform written in Rust.
+`utilitycss` is a runtime-agnostic utility CSS compiler platform written in Rust.
 
 It treats utility class names as a small domain-specific language and is designed to serve native Rust applications, a CLI, and thin integrations for Node.js, Bun, Deno, Vite, and SWC-based toolchains. The compiler core owns semantics; host runtimes own I/O and lifecycle integration.
 
-> Status: documentation and architecture phase. This repository currently contains the project specifications and contributor guidance; the Cargo workspace and implementation are planned work. `utilitycss` is the working package name and may change before the first stable release.
+> Status: Phase 6 ecosystem work in progress. The workspace, deterministic scanner/parser, typed theme and utility layers, incremental compiler, declarative config, native CLI, versioned protocol, N-API/WASM bindings, thin Node/Vite/WASM wrappers, and conservative static extraction are present. Full AST extraction, broader ecosystem support, and release hardening remain on the roadmap. `utilitycss` is the working package name and may change before the first stable release.
 
 ## Design goals
 
@@ -12,7 +12,7 @@ It treats utility class names as a small domain-specific language and is designe
 - **Runtime agnostic:** the semantic core MUST NOT depend on Node.js, Bun, Deno, Vite, SWC, or a browser runtime.
 - **Structured internals:** candidates are parsed into explicit representations before CSS generation.
 - **Deterministic output:** identical semantic inputs MUST produce byte-for-byte stable CSS.
-- **Incremental by design:** source updates should invalidate only the affected candidates and rules.
+- **Incremental by design:** source updates SHOULD invalidate only the affected candidates and rules.
 - **Thin adapters:** bindings and build-tool integrations map host APIs onto the same compiler behavior.
 - **Useful diagnostics:** errors should explain what failed, where it failed, and how to correct it when possible.
 
@@ -21,7 +21,7 @@ It treats utility class names as a small domain-specific language and is designe
 Source such as:
 
 ```html
-<div class="flex gap-4 p-4 hover:bg-brand-600 md:grid">
+<div class="flex gap-4 p-4 hover:bg-brand-600 md:grid"></div>
 ```
 
 is intended to pass through this pipeline:
@@ -40,12 +40,12 @@ An illustrative result is:
 
 ```css
 .flex { display: flex; }
-.gap-4 { gap: calc(var(--spacing) * 4); }
-.p-4 { padding: calc(var(--spacing) * 4); }
+.gap-4 { gap: 1rem; }
+.p-4 { padding: 1rem; }
 /* variant-generated rules are omitted */
 ```
 
-The example describes the intended model, not a currently runnable command in this repository.
+The current CLI can emit this same semantic subset with `cargo run -p utilitycss-cli -- build <input>`.
 
 ## Architecture
 
@@ -67,11 +67,35 @@ The core boundary is deliberate:
 
 See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) and [`docs/CRATE_LAYOUT.md`](./docs/CRATE_LAYOUT.md) for the detailed boundaries.
 
+## Current implementation
+
+The initial workspace is intentionally small and runtime-independent:
+
+- [`utilitycss-span`](./crates/utilitycss-span/) — stable source IDs and half-open byte spans.
+- [`utilitycss-diagnostics`](./crates/utilitycss-diagnostics/) — typed, source-aware diagnostics.
+- [`utilitycss-scanner`](./crates/utilitycss-scanner/) — language-agnostic candidate discovery with spans.
+- [`utilitycss-extractor`](./crates/utilitycss-extractor/) — conservative static extraction from class attributes and common class helpers.
+- [`utilitycss-syntax`](./crates/utilitycss-syntax/) — borrowed candidate AST and DSL parser.
+- [`utilitycss-theme`](./crates/utilitycss-theme/) — deterministic typed design tokens.
+- [`utilitycss-utilities`](./crates/utilitycss-utilities/) — extensible initial utility registry and lowering.
+- [`utilitycss-variants`](./crates/utilitycss-variants/) — selector and wrapper transformations.
+- [`utilitycss-css-ir`](./crates/utilitycss-css-ir/) — ordered CSS rules and pretty/minified serialization.
+- [`utilitycss-compiler`](./crates/utilitycss-compiler/) — source indexes, semantic cache, and compiler facade.
+- [`utilitycss-config`](./crates/utilitycss-config/) — declarative JSON configuration loader.
+- [`utilitycss-cli`](./crates/utilitycss-cli/) — native build/watch adapter.
+- [`utilitycss-napi`](./crates/utilitycss-napi/) and [`utilitycss-wasm`](./crates/utilitycss-wasm/) — thin native/WASM bindings.
+- [`utilitycss-protocol`](./crates/utilitycss-protocol/) — versioned typed/JSON transport messages for external hosts.
+- [`utilitycss-bench`](./crates/utilitycss-bench/) — dependency-free scanner/parser benchmark harness.
+- [`@utilitycss/node`](./packages/utilitycss-node/) and [`@utilitycss/vite`](./packages/utilitycss-vite/) — TypeScript lifecycle adapters.
+- [`@utilitycss/wasm`](./packages/utilitycss-wasm/) — TypeScript wrapper for generated WASM bindings.
+
+The facade currently compiles the documented initial utility and variant subset. It remains intentionally conservative: scanner false positives are ignored, unknown syntax is reported as structured diagnostics when appropriate, and arbitrary CSS fragments are validated before lowering.
+
 ## Compatibility
 
 The project is inspired by utility-first CSS ergonomics, but it is **not** a drop-in Tailwind-compatible implementation. Any compatibility behavior MUST be published as an explicit preset with documented grammar, theme tokens, utilities, variants, ordering, and CSS semantics.
 
-The same semantic input should produce equivalent output through native Rust, the CLI, Node.js, Bun, Deno, and Vite. Adapter APIs may differ; compiler meaning must not.
+The same semantic input SHOULD produce equivalent output through native Rust, the CLI, Node.js, Bun, Deno, and Vite. Adapter APIs MAY differ; compiler meaning MUST NOT.
 
 ## Roadmap
 
@@ -93,6 +117,7 @@ Start with [`LLMS.md`](./LLMS.md) for agent guidance, [`docs/VISION.md`](./docs/
 
 ### Repository guidance
 
+- [`README.md`](./README.md) — project overview and documentation index.
 - [`AGENTS.md`](./AGENTS.md) — repository rules for contributors and coding agents.
 - [`LLMS.md`](./LLMS.md) — instructions and priorities for autonomous coding agents.
 - [`MANIFEST.json`](./MANIFEST.json) — machine-readable inventory of the repository documentation.
@@ -146,7 +171,31 @@ Start with [`LLMS.md`](./LLMS.md) for agent guidance, [`docs/VISION.md`](./docs/
 
 Before implementation work, read [`LLMS.md`](./LLMS.md), [`docs/VISION.md`](./docs/VISION.md), [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md), and the relevant specification and roadmap phase. Externally visible grammar, configuration, ordering, API, or architecture changes SHOULD be recorded through the RFC/ADR process described in [`docs/CONTRIBUTING.md`](./docs/CONTRIBUTING.md).
 
-Once the Cargo workspace exists, the baseline formatting, lint, test, and benchmark commands are defined in [`AGENTS.md`](./AGENTS.md). Do not treat those commands as available until the implementation phase creates the workspace.
+The baseline formatting, lint, test, and benchmark commands are defined in [`AGENTS.md`](./AGENTS.md) and are runnable against the current workspace.
+
+## Local validation
+
+From the repository root:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+cargo bench -p utilitycss-bench
+```
+
+These commands validate the current Rust workspace. They do not imply that every later roadmap feature is implemented.
+
+JavaScript adapter checks use npm:
+
+```bash
+npm run lint
+npm run typecheck
+npm run build
+npm test
+```
+
+The native N-API package requires a platform binary produced from `utilitycss-napi` before the default Node loader can be used. Wrapper tests inject a fake native constructor so lifecycle behavior remains testable without that binary.
 
 ## Project vocabulary
 

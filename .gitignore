@@ -1,0 +1,5 @@
+/target/
+/node_modules/
+/packages/*/dist/
+/packages/utilitycss-napi/*.node
+/crates/utilitycss-napi/*.node

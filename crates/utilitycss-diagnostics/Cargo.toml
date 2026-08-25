@@ -1,0 +1,12 @@
+[package]
+name = "utilitycss-diagnostics"
+description = "Typed, source-aware diagnostics for utilitycss."
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+utilitycss-span = { path = "../utilitycss-span" }
+
+[lints]
+workspace = true

@@ -1,0 +1,15 @@
+[package]
+name = "utilitycss-config"
+description = "Declarative JSON configuration loading for utilitycss hosts."
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+utilitycss-css-ir = { path = "../utilitycss-css-ir" }
+utilitycss-theme = { path = "../utilitycss-theme" }
+
+[lints]
+workspace = true

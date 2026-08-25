@@ -1,0 +1,16 @@
+[package]
+name = "utilitycss-utilities"
+description = "Registry and semantic lowering for the initial utilitycss utility set."
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+utilitycss-css-ir = { path = "../utilitycss-css-ir" }
+utilitycss-diagnostics = { path = "../utilitycss-diagnostics" }
+utilitycss-span = { path = "../utilitycss-span" }
+utilitycss-syntax = { path = "../utilitycss-syntax" }
+utilitycss-theme = { path = "../utilitycss-theme" }
+
+[lints]
+workspace = true

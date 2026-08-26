@@ -304,6 +304,24 @@ test("uses Bun's live development server mode alongside incremental graph builds
   }
 });
 
+test("does not require bundler entrypoints in Bun's serve lifecycle", () => {
+  type SetupBuild = Parameters<NonNullable<ReturnType<typeof utilitycss>["setup"]>>[0];
+  let onEnd: (() => void) | undefined;
+  const build = {
+    config: {},
+    onStart() {},
+    onResolve() {},
+    onLoad() {},
+    onEnd(callback: () => void) {
+      onEnd = callback;
+    }
+  } as unknown as SetupBuild;
+
+  utilitycss({ native: FakeNativeCompiler }).setup(build);
+  assert.ok(onEnd);
+  assert.doesNotThrow(() => onEnd?.());
+});
+
 test("recovers after an incremental diagnostic and handles graph creation/removal", async () => {
   const root = await makeProject({
     "entry.ts": 'import "./a.ts"; import "./b.ts"; import "utilitycss";',

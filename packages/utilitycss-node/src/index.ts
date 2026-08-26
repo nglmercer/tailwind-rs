@@ -63,11 +63,22 @@ export interface CandidateInput {
 }
 
 /** A native compiler constructor, injectable for tests and alternate loaders. */
-export type NativeCompilerFactory = new (pretty?: boolean) => NativeCompiler;
+export type BrowserTarget = "modern" | "evergreen" | "safari-15" | "legacy";
+
+/** A native compiler constructor, injectable for tests and alternate loaders. */
+export type NativeCompilerFactory = new (
+  pretty?: boolean,
+  configSource?: string,
+  browserTarget?: BrowserTarget
+) => NativeCompiler;
 
 /** Options for creating a Node adapter. */
 export interface CompilerOptions {
   readonly pretty?: boolean;
+  /** Declarative JSON or CSS-first configuration source. */
+  readonly config?: string;
+  /** Browser support target used for structured compatibility diagnostics. */
+  readonly browserTarget?: BrowserTarget;
   readonly native?: NativeCompilerFactory;
 }
 
@@ -97,6 +108,20 @@ export class Compiler {
   public removeSource(id: string): boolean {
     this.assertActive();
     return this.native.removeSource(id);
+  }
+
+  /** Extracts candidates through the native host-language extractor. */
+  public extractCandidates(content: string, path?: string): readonly CandidateInput[] {
+    this.assertActive();
+    if (!this.native.extractCandidates) {
+      throw new Error("native compiler does not expose candidate extraction");
+    }
+    return this.native.extractCandidates(content, path).map(candidate => ({
+      raw: candidate.raw,
+      start: candidate.start,
+      end: candidate.end,
+      extractionMode: candidate.extractionMode
+    }));
   }
 
   /** Builds CSS and normalizes the native result shape. */
@@ -156,7 +181,7 @@ export class Compiler {
 /** Creates a Node adapter using the installed native binding or an injected factory. */
 export function createCompiler(options: CompilerOptions = {}): Compiler {
   const factory = options.native ?? loadNativeFactory();
-  return new Compiler(new factory(options.pretty ?? false));
+  return new Compiler(new factory(options.pretty, options.config, options.browserTarget));
 }
 
 function loadNativeFactory(): NativeCompilerFactory {

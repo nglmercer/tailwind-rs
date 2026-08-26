@@ -1,5 +1,4 @@
 import homepage from "./index.html";
-import { handleMockApi } from "./mock-api.ts";
 
 const port = Number(process.env.PORT ?? 3000);
 const development = process.env.NODE_ENV !== "production";
@@ -15,13 +14,7 @@ const server = Bun.serve({
         console: true
       }
     : false,
-  async fetch(request) {
-    const apiResponse = await handleMockApi(request);
-
-    if (apiResponse) {
-      return apiResponse;
-    }
-
+  fetch() {
     return new Response("Not found", { status: 404 });
   }
 });

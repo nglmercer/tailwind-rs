@@ -2,8 +2,8 @@
 /* eslint-disable */
 /** A reusable JavaScript-facing compiler instance. */
 export declare class Compiler {
-  /** Creates a compiler, optionally selecting readable CSS output. */
-  constructor(pretty?: boolean | undefined | null)
+  /** Creates a compiler with optional readable output, declarative config, and browser target. */
+  constructor(pretty?: boolean | undefined | null, configSource?: string | undefined | null, browserTarget?: string | undefined | null)
   /** Inserts or replaces one source unit. */
   updateSource(id: string, content: string, path?: string | undefined | null, candidates?: Array<JsCandidate> | undefined | null): void
   /** Extracts static class candidates using SWC or the selected framework adapter. */
@@ -12,11 +12,11 @@ export declare class Compiler {
   removeSource(id: string): boolean
   /** Builds the current sources and returns CSS, diagnostics, and counters. */
   build(): JsBuildResult
-  /** Explains one candidate and returns a stable JSON payload. */
+  /** Explains one candidate and returns the stable JSON introspection payload. */
   explain(candidate: string): string
-  /** Validates one candidate and returns a stable JSON payload. */
+  /** Validates one candidate and returns the stable JSON validation payload. */
   validate(candidate: string): string
-  /** Returns the active capability manifest as JSON. */
+  /** Returns the active machine-readable capability manifest as JSON. */
   capabilities(): string
   /** Transforms authored CSS and resolves explicit `@apply` directives. */
   transformStylesheet(id: string, content: string, path?: string | undefined | null): JsStylesheetResult
@@ -41,7 +41,7 @@ export interface JsCandidate {
   /** Exclusive end byte offset. */
   end: number
   /** Extraction mode that produced this candidate. */
-  extractionMode?: string | null
+  extractionMode?: string
 }
 
 /** A diagnostic returned across the N-API boundary. */

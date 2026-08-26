@@ -40,7 +40,12 @@ export function utilitycss(options: UtilityCssBunOptions = {}): BunPlugin {
 
   const createBuildCompiler = (): void => {
     compiler?.dispose();
-    compiler = createCompiler({ pretty: options.pretty, native: options.native });
+    compiler = createCompiler({
+      pretty: options.pretty,
+      config: options.config,
+      browserTarget: options.browserTarget,
+      native: options.native
+    });
     for (const [id, source] of moduleSources) {
       requireCompiler().updateSource(id, source, id);
     }
@@ -57,7 +62,12 @@ export function utilitycss(options: UtilityCssBunOptions = {}): BunPlugin {
     return current;
   };
 
-  const pruneSourceGraph = (entrypoints: readonly string[]): void => {
+  const pruneSourceGraph = (entrypoints: readonly string[] | undefined): void => {
+    // Bun's serve/static lifecycle may omit bundler entrypoints. In that mode the live
+    // graph is authoritative and there is no safe root set from which to prune.
+    if (!entrypoints) {
+      return;
+    }
     const roots = entrypoints
       .map((entrypoint) => {
         try {

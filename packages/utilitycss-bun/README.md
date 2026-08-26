@@ -2,7 +2,9 @@
 
 `@utilitycss/bun` is the Bun bundler and fullstack integration for `utilitycss`.
 It collects supported source modules through Bun's plugin lifecycle and serves generated CSS from
-the virtual `utilitycss` stylesheet specifier.
+the virtual `utilitycss` stylesheet specifier. `config` accepts the same declarative JSON or
+CSS-first source supported by the native compiler, while `browserTarget` enables target-aware
+diagnostics.
 
 ```ts
 import { utilitycss } from "@utilitycss/bun";
@@ -11,7 +13,10 @@ const result = await Bun.build({
   entrypoints: ["src/server.ts"],
   outdir: "dist",
   target: "bun",
-  plugins: [utilitycss()]
+  plugins: [utilitycss({
+    config: '@theme { --color-brand-600: oklch(55% 0.2 260); }',
+    browserTarget: "modern"
+  })]
 });
 
 if (!result.success) {

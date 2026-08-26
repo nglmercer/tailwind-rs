@@ -10,12 +10,13 @@ export interface ProductionBuildOptions {
 
 /** Builds the fullstack example with Bun's bundler and the utilitycss plugin. */
 export async function buildProduction(options: ProductionBuildOptions = {}) {
+  const config = await Bun.file(resolve(projectRoot, "utilitycss.config.css")).text();
   const buildOptions = {
     entrypoints: [resolve(projectRoot, "src", "server.ts")],
     outdir: outputDirectory,
     target: "bun",
     minify: true,
-    plugins: [utilitycss({ pretty: false })],
+    plugins: [utilitycss({ browserTarget: "modern", config, pretty: false })],
     write: options.write ?? true
   } as Bun.BuildConfig & { write?: boolean };
 
@@ -32,7 +33,7 @@ if (import.meta.main) {
     result.outputs.filter((output) => output.path.endsWith(".css")).map((output) => output.text())
   );
   const css = cssOutputs.join("\n");
-  if (!css.includes(".p-4") || !css.includes(".flex") || !css.includes(".auth-button")) {
+  if (!css.includes(".button-primary") || !css.includes(".component-card") || !css.includes(".form-input")) {
     throw new Error("Bun production build did not include generated utilitycss CSS");
   }
   console.log(`Bun production build passed with ${result.outputs.length} output assets.`);

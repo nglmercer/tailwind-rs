@@ -8,7 +8,8 @@
 use napi::{Error, Result, Status};
 use napi_derive::napi;
 use utilitycss_compiler::{CandidateInput, Compiler as CoreCompiler, CompilerConfig, SourceInput};
-use utilitycss_css_ir::CssSerializationMode;
+use utilitycss_config::{parse_css, parse_json, ConfigFile};
+use utilitycss_css_ir::{BrowserTarget, CssSerializationMode};
 use utilitycss_diagnostics::Severity;
 use utilitycss_extractor::{extract_for_framework, Framework};
 use utilitycss_scanner::ExtractionMode;
@@ -101,15 +102,47 @@ pub struct Compiler {
 
 #[napi]
 impl Compiler {
-    /// Creates a compiler, optionally selecting readable CSS output.
+    /// Creates a compiler with optional readable output, declarative config, and browser target.
     #[napi(constructor)]
-    pub fn new(pretty: Option<bool>) -> Self {
-        let mode = if pretty.unwrap_or(false) {
-            CssSerializationMode::Pretty
-        } else {
-            CssSerializationMode::Minified
+    pub fn new(
+        pretty: Option<bool>,
+        config_source: Option<String>,
+        browser_target: Option<String>,
+    ) -> Result<Self> {
+        let config = config_source.as_deref().map(parse_config_source).transpose()?;
+        let browser_target = match browser_target.as_deref() {
+            Some(target) => BrowserTarget::parse(target).ok_or_else(|| {
+                Error::new(Status::InvalidArg, format!("unknown browser target `{target}`"))
+            })?,
+            None => {
+                config.as_ref().map(ConfigFile::browser_target).unwrap_or(BrowserTarget::Modern)
+            }
         };
-        Self { inner: CoreCompiler::new(CompilerConfig::new().with_serialization_mode(mode)) }
+        let mode = pretty.map_or_else(
+            || {
+                config
+                    .as_ref()
+                    .map(ConfigFile::serialization_mode)
+                    .unwrap_or(CssSerializationMode::Minified)
+            },
+            |pretty| {
+                if pretty {
+                    CssSerializationMode::Pretty
+                } else {
+                    CssSerializationMode::Minified
+                }
+            },
+        );
+        let mut compiler_config =
+            CompilerConfig::new().with_serialization_mode(mode).with_browser_target(browser_target);
+        if let Some(config) = config {
+            compiler_config = compiler_config
+                .with_theme(config.theme().clone())
+                .with_utility_registry(config.utilities().clone())
+                .with_variant_registry(config.variants().clone())
+                .with_preset_name(config.preset().name());
+        }
+        Ok(Self { inner: CoreCompiler::new(compiler_config) })
     }
 
     /// Inserts or replaces one source unit.
@@ -278,6 +311,12 @@ fn js_diagnostic(diagnostic: &utilitycss_diagnostics::Diagnostic) -> JsDiagnosti
             .map(|suggestion| suggestion.replacement.clone())
             .collect(),
     }
+}
+
+fn parse_config_source(source: &str) -> Result<ConfigFile> {
+    let trimmed = source.trim_start();
+    let result = if trimmed.starts_with('{') { parse_json(source) } else { parse_css(source) };
+    result.map_err(|error| Error::new(Status::InvalidArg, error.to_string()))
 }
 
 fn saturating_u32(value: usize) -> u32 {

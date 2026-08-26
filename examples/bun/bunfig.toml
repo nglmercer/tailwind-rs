@@ -1,2 +1,2 @@
 [serve.static]
-plugins = ["../../packages/utilitycss-bun/src/index.ts"]
+plugins = ["./src/bun-plugin.ts"]

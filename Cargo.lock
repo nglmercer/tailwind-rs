@@ -1907,6 +1907,7 @@ dependencies = [
  "napi-derive",
  "serde_json",
  "utilitycss-compiler",
+ "utilitycss-config",
  "utilitycss-css-ir",
  "utilitycss-diagnostics",
  "utilitycss-extractor",

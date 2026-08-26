@@ -176,6 +176,13 @@ Before implementation work, read [`LLMS.md`](./LLMS.md), [`docs/VISION.md`](./do
 
 The baseline formatting, lint, test, and benchmark commands are defined in [`AGENTS.md`](./AGENTS.md) and are runnable against the current workspace.
 
+## Bun example
+
+[`examples/bun`](./examples/bun/) is a Bun login/register web app with a mock REST API. It compiles
+HTML and JavaScript with the Rust compiler through the `@utilitycss/node` adapter and serves the
+generated CSS. Its README includes the native binding setup, verification command, and development
+server instructions.
+
 ## Local validation
 
 From the repository root:

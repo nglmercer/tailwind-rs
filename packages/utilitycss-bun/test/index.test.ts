@@ -192,8 +192,7 @@ async function build(root: string, plugin: ReturnType<typeof utilitycss>, entry:
     outdir: join(root, "out"),
     plugins: [plugin],
     target: "browser",
-    jsx: { runtime: "classic", factory: "h" },
-    write: false
+    jsx: { runtime: "classic", factory: "h" }
   });
   const outputs = await Promise.all(result.outputs.map((artifact) => artifact.text()));
   const css = outputs.find((contents, index) => result.outputs[index].path.endsWith(".css")) ?? "";

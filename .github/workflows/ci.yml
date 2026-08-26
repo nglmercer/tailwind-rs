@@ -71,6 +71,32 @@ jobs:
       - name: Validate package contents
         run: npm run validate:packages
 
+  bun:
+    name: Bun bundler and fullstack integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install dependencies
+        run: npm ci
+      - name: Build current-platform native binding
+        run: npm run build:native --workspace=@utilitycss/napi
+      - name: Build JavaScript adapters
+        run: npm run build
+      - name: Test Bun adapter
+        run: npm test --workspace=@utilitycss/bun
+      - name: Verify Bun fullstack example
+        run: npm --prefix examples/bun run verify
+      - name: Verify Bun production build
+        run: npm --prefix examples/bun run build
+
   wasm:
     name: WASM build and runtime smoke
     runs-on: ubuntu-latest

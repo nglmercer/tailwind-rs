@@ -1,0 +1,201 @@
+import { strict as assert } from "node:assert";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "bun:test";
+import utilitycssDefault, { utilitycss } from "../src/index";
+
+type SourceMap = Map<string, string>;
+
+const STATS = {
+  sourcesScanned: 0,
+  bytesScanned: 0,
+  candidatesFound: 0,
+  uniqueCandidates: 0,
+  candidatesParsed: 0,
+  cacheHits: 0,
+  rulesGenerated: 0,
+  rulesRemoved: 0
+};
+
+class FakeNativeCompiler {
+  private readonly sources: SourceMap = new Map();
+
+  public constructor(_pretty = false) {}
+
+  public updateSource(id: string, content: string): void {
+    this.sources.set(id, content);
+  }
+
+  public removeSource(id: string): boolean {
+    return this.sources.delete(id);
+  }
+
+  public build() {
+    const diagnostics = [...this.sources.entries()]
+      .filter(([, content]) => content.includes("utility-error"))
+      .map(([source]) => ({
+        severity: "error" as const,
+        code: "UTILITY001",
+        message: "invalid arbitrary value",
+        source,
+        start: 10,
+        end: 24,
+        help: "expected a balanced CSS value"
+      }));
+    const warnings = [...this.sources.entries()]
+      .filter(([, content]) => content.includes("utility-warning"))
+      .map(([source]) => ({
+        severity: "warning" as const,
+        code: "UTILITY002",
+        message: "fixture warning",
+        source,
+        start: 2,
+        end: 8,
+        help: "remove the fixture marker"
+      }));
+    const classes = new Set<string>();
+    for (const content of this.sources.values()) {
+      for (const match of content.matchAll(/\b(?:flex|p-4|p-8|bg-red-500)\b/g)) {
+        classes.add(match[0]);
+      }
+    }
+    const rules: Record<string, string> = {
+      "bg-red-500": ".bg-red-500{background-color:#ef4444;}",
+      flex: ".flex{display:flex;}",
+      "p-4": ".p-4{padding:1rem;}",
+      "p-8": ".p-8{padding:2rem;}"
+    };
+    const css = [...classes].sort().map((name) => rules[name]).join("");
+    return {
+      css,
+      diagnostics: [...diagnostics, ...warnings],
+      stats: { ...STATS, sourcesScanned: this.sources.size, bytesScanned: [...this.sources.values()].join("").length }
+    };
+  }
+}
+
+test("exports a configurable factory and a Bunfig-compatible default plugin", () => {
+  assert.equal(typeof utilitycssDefault.setup, "function");
+  assert.equal(utilitycssDefault.name, "utilitycss-bun");
+  assert.equal(typeof utilitycss().setup, "function");
+});
+
+test("generates CSS from HTML linked to the utilitycss virtual stylesheet", async () => {
+  const root = await makeProject({
+    "index.html": '<link rel="stylesheet" href="utilitycss"><main class="p-4"></main>'
+  });
+  try {
+    const output = await build(root, utilitycss({ native: FakeNativeCompiler }), "index.html");
+    assert.equal(output.result.success, true, JSON.stringify(output.result.logs));
+    assert.match(output.css, /\.p-4\s*\{\s*padding:\s*1rem;/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("extracts JavaScript and TSX module graph sources", async () => {
+  const root = await makeProject({
+    "entry.ts": 'import "./helpers.js"; import "./Button.tsx"; import "utilitycss";',
+    "helpers.js": 'export const classes = cn("flex", "p-4");',
+    "Button.tsx": 'export const Button = () => <button className={clsx("flex", active && "p-4")} />;'
+  });
+  try {
+    const output = await build(root, utilitycss({ native: FakeNativeCompiler }), "entry.ts");
+    assert.equal(output.result.success, true, JSON.stringify(output.result.logs));
+    assert.match(output.css, /\.flex\s*\{\s*display:\s*flex;/);
+    assert.match(output.css, /\.p-4\s*\{\s*padding:\s*1rem;/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("rebuilds from the current graph without stale replacement or deleted-source CSS", async () => {
+  const root = await makeProject({
+    "entry.ts": 'import "./source.ts"; import "utilitycss";',
+    "source.ts": 'export const classes = "p-4";'
+  });
+  let constructors = 0;
+  class CountingNativeCompiler extends FakeNativeCompiler {
+    public constructor(pretty = false) {
+      super(pretty);
+      constructors += 1;
+    }
+  }
+  const plugin = utilitycss({ native: CountingNativeCompiler });
+  try {
+    const first = await build(root, plugin, "entry.ts");
+    assert.match(first.css, /\.p-4\s*\{\s*padding:\s*1rem;/);
+
+    await writeFile(join(root, "source.ts"), 'export const classes = "p-8";');
+    const second = await build(root, plugin, "entry.ts");
+    assert.match(second.css, /\.p-8\s*\{\s*padding:\s*2rem;/);
+    assert.doesNotMatch(second.css, /\.p-4\s*\{/);
+
+    await writeFile(join(root, "entry.ts"), 'import "utilitycss";');
+    const third = await build(root, plugin, "entry.ts");
+    assert.doesNotMatch(third.css, /\.p-(?:4|8)\s*\{/);
+    assert.equal(constructors, 3);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("emits byte-identical CSS for the same graph twice", async () => {
+  const root = await makeProject({
+    "entry.ts": 'import "./source.ts"; import "utilitycss";',
+    "source.ts": 'export const classes = "p-8 flex";'
+  });
+  const plugin = utilitycss({ native: FakeNativeCompiler });
+  try {
+    const first = await build(root, plugin, "entry.ts");
+    const second = await build(root, plugin, "entry.ts");
+    assert.equal(second.css, first.css);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("fails the Bun build for errors and keeps warnings visible", async () => {
+  const root = await makeProject({
+    "entry.ts": 'import "./source.ts"; import "utilitycss";',
+    "source.ts": 'export const classes = "utility-error utility-warning";'
+  });
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (...values: unknown[]) => warnings.push(values.join(" "));
+  try {
+    await assert.rejects(
+      () => build(root, utilitycss({ native: FakeNativeCompiler }), "entry.ts"),
+      /Bundle failed/
+    );
+    assert.match(warnings.join("\n"), /UTILITY002/);
+    assert.match(warnings.join("\n"), /help: remove the fixture marker/);
+  } finally {
+    console.warn = originalWarn;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+async function makeProject(files: Record<string, string>): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "utilitycss-bun-test-"));
+  await mkdir(join(root, "out"), { recursive: true });
+  for (const [relativePath, content] of Object.entries(files)) {
+    await writeFile(join(root, relativePath), content);
+  }
+  return root;
+}
+
+async function build(root: string, plugin: ReturnType<typeof utilitycss>, entry: string) {
+  const result = await Bun.build({
+    entrypoints: [join(root, entry)],
+    outdir: join(root, "out"),
+    plugins: [plugin],
+    target: "browser",
+    jsx: { runtime: "classic", factory: "h" },
+    write: false
+  });
+  const outputs = await Promise.all(result.outputs.map((artifact) => artifact.text()));
+  const css = outputs.find((contents, index) => result.outputs[index].path.endsWith(".css")) ?? "";
+  return { result, css };
+}

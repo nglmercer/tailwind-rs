@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "setup": "npm --prefix ../.. run build:native && npm --prefix ../.. run build --workspace=@utilitycss/node",
-    "build": "bun run src/build.ts",
+    "setup": "npm --prefix ../.. run build:native && npm --prefix ../.. run build --workspace=@utilitycss/node && npm --prefix ../.. run build --workspace=@utilitycss/bun",
+    "build": "bun run src/production-build.ts",
     "verify": "bun run src/verify.ts",
     "test": "bun run verify",
-    "dev": "bun run src/server.ts"
+    "dev": "bun --hot src/server.ts"
   }
 }

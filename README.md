@@ -88,7 +88,9 @@ The initial workspace is intentionally small and runtime-independent:
 - [`utilitycss-protocol`](./crates/utilitycss-protocol/) — versioned typed/JSON transport messages for external hosts.
 - [`utilitycss-lsp`](./crates/utilitycss-lsp/) — stdio Language Server Protocol adapter with diagnostics, completion, and hover.
 - [`utilitycss-bench`](./crates/utilitycss-bench/) — dependency-free scanner/parser benchmark harness.
-- [`@utilitycss/node`](./packages/utilitycss-node/) and [`@utilitycss/vite`](./packages/utilitycss-vite/) — TypeScript lifecycle adapters.
+- [`@utilitycss/node`](./packages/utilitycss-node/) — generic JavaScript lifecycle/compiler adapter.
+- [`@utilitycss/bun`](./packages/utilitycss-bun/) — Bun bundler, fullstack, and HMR plugin.
+- [`@utilitycss/vite`](./packages/utilitycss-vite/) — Vite lifecycle adapter.
 - [`@utilitycss/wasm`](./packages/utilitycss-wasm/) — TypeScript wrapper for generated WASM bindings.
 
 The facade currently compiles the documented initial utility and variant subset. It remains intentionally conservative: scanner false positives are ignored, unknown syntax is reported as structured diagnostics when appropriate, and arbitrary CSS fragments are validated before lowering. See [`docs/PRODUCTION_CONTRACT.md`](./docs/PRODUCTION_CONTRACT.md) for the support and release contract.
@@ -178,10 +180,29 @@ The baseline formatting, lint, test, and benchmark commands are defined in [`AGE
 
 ## Bun example
 
-[`examples/bun`](./examples/bun/) is a Bun login/register web app with a mock REST API. It compiles
-HTML and JavaScript with the Rust compiler through the `@utilitycss/node` adapter and serves the
-generated CSS. Its README includes the native binding setup, verification command, and development
-server instructions.
+`@utilitycss/node` is the generic JavaScript compiler lifecycle API. `@utilitycss/bun` integrates
+that API with Bun's bundler, fullstack server, and HMR lifecycle:
+
+```bash
+bun add @utilitycss/bun
+```
+
+```toml
+[serve.static]
+plugins = ["@utilitycss/bun"]
+```
+
+```html
+<link rel="stylesheet" href="utilitycss" />
+```
+
+Development can run with `bun --hot src/server.ts`; the plugin generates a virtual stylesheet from
+the current Bun module graph and does not require a second watcher or `public/utilitycss.css`.
+Production builds should pass `utilitycss()` explicitly to `Bun.build()`.
+
+[`examples/bun`](./examples/bun/) is a complete login/register fullstack example with a mock REST
+API. Its README includes setup, `bun run verify`, production build, HMR, and packed integration
+details.
 
 ## Local validation
 
@@ -203,6 +224,15 @@ cargo test -p utilitycss-lsp
 ```
 
 These commands validate the current Rust workspace. They do not imply that every later roadmap feature is implemented.
+
+For the reproducible local release gate, run:
+
+```bash
+npm run release:check
+```
+
+This reports unavailable external native architectures as `SKIP`; skipped platform checks are not
+release evidence.
 
 JavaScript adapter checks use npm:
 

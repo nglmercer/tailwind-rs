@@ -43,11 +43,50 @@ const result = compiler.build()
 
 ## Bun
 
-First try to use the same N-API package.
+`@utilitycss/node` is the generic JavaScript lifecycle/compiler API. `@utilitycss/bun` is the
+first-class Bun bundler and fullstack integration built on that API. The Bun adapter MUST preserve
+Rust compiler semantics and MUST NOT start a second filesystem watcher.
 
-Only create a Bun-specific native adapter if measured incompatibilities require it.
+Use the plugin with Bun's bundler:
 
-A Bun plugin wrapper may still be useful for lifecycle integration.
+```ts
+import { utilitycss } from "@utilitycss/bun";
+
+const result = await Bun.build({
+  entrypoints: ["src/server.ts"],
+  outdir: "dist",
+  target: "bun",
+  plugins: [utilitycss()]
+});
+```
+
+For Bun fullstack development, configure `bunfig.toml`:
+
+```toml
+[serve.static]
+plugins = ["@utilitycss/bun"]
+```
+
+HTML references the virtual stylesheet without a generated development file:
+
+```html
+<link rel="stylesheet" href="utilitycss" />
+```
+
+The plugin MUST:
+
+- create one compiler for each Bun build cycle;
+- collect `.html`, `.htm`, JavaScript, TypeScript, JSX/TSX, Vue, Svelte, and Astro modules through
+  Bun `onLoad` hooks;
+- defer the virtual CSS load until source modules have been loaded;
+- normalize file URLs, `/@fs/` IDs, separators, queries, and real paths;
+- fail builds for compiler errors and expose warnings with their structured source information;
+- regenerate CSS from the current module graph so deleted modules cannot leave stale utilities;
+- avoid writing development CSS to disk and avoid an adapter-owned watcher.
+
+The default virtual specifier is `utilitycss`; callers MAY override it with `specifier`. The package
+exports the configurable `utilitycss()` factory and a zero-options plugin object as its default
+export, which lets Bun load it directly from `bunfig.toml`.
 
 ## Deno
 
@@ -125,6 +164,11 @@ Every adapter must pass the same behavior fixtures:
 The Rust conformance fixtures live under `crates/utilitycss-compiler/tests/fixtures`. Native Node
 smoke coverage is run after a platform N-API build; the regular JavaScript tests use injectable
 fakes so they remain runnable without a native binary.
+
+The Bun package additionally tests HTML links, JavaScript and TSX module extraction, source
+replacement, deleted-source invalidation, diagnostics, deterministic output, and packed-artifact
+installation. `examples/bun` runs an actual `Bun.build()` production smoke and provides the Bun
+`--hot` fullstack server path.
 
 This prevents semantic drift.
 

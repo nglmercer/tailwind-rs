@@ -62,6 +62,22 @@ Agents MUST preserve these constraints:
 - Public Rust APIs should not expose JavaScript-runtime types.
 - N-API/WASM bindings must map onto core types, not duplicate semantics.
 
+## Bun integration contract
+
+`@utilitycss/node` is the generic JavaScript lifecycle adapter. `@utilitycss/bun` is the dedicated
+Bun bundler/fullstack integration and MUST use Bun plugin lifecycle hooks rather than wrapping the
+CLI watcher or starting a second filesystem watcher.
+
+The Bun plugin MUST create a fresh compiler for each bundler build cycle, collect supported source
+modules through Bun's module graph, expose generated CSS through the virtual `utilitycss` specifier,
+defer CSS generation until source loading completes, preserve structured diagnostics, and reflect
+source deletion by rebuilding from the current graph. Development MUST NOT require writing
+`public/utilitycss.css`.
+
+The repository example at `examples/bun` is the integration reference. Its `bunfig.toml` covers
+`bun --hot src/server.ts`; `src/production-build.ts` covers explicit `Bun.build()` production
+usage; and `bun run verify` covers compiler loading, CSS output, and mock API behavior.
+
 ## Working method
 
 For each task:
@@ -155,6 +171,13 @@ Avoid giant cross-cutting commits unless the task is a planned migration.
 ## Generated code
 
 Generated files must include a header stating how to regenerate them. Agents should modify the generator, not the generated output, unless the repository explicitly documents otherwise.
+
+## Local release verification
+
+Run `npm run release:check` before release preparation. It MUST report unavailable external platform
+tests as `SKIP`, never as passing checks. GitHub Actions jobs that cannot start because of an
+external billing/account limitation are not release evidence; keep the workflow configuration
+valid and record local verification separately.
 
 ## Final agent note
 

@@ -10,6 +10,7 @@ const npm = process.env.npm_execpath
 const packages = [
   { name: "@utilitycss/napi", cwd: "packages/utilitycss-napi" },
   { name: "@utilitycss/node", cwd: "packages/utilitycss-node" },
+  { name: "@utilitycss/bun", cwd: "packages/utilitycss-bun" },
   { name: "@utilitycss/vite", cwd: "packages/utilitycss-vite" },
   { name: "@utilitycss/wasm", cwd: "packages/utilitycss-wasm" },
   { name: "@utilitycss/napi-darwin-arm64", cwd: "packages/utilitycss-napi/npm/darwin-arm64" },

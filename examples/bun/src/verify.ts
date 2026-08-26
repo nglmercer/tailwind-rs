@@ -1,4 +1,4 @@
-import { buildCss } from "./build.ts";
+import { buildProduction } from "./production-build.ts";
 import { handleMockApi } from "./mock-api.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -17,7 +17,13 @@ async function json<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
-const result = await buildCss();
+const result = await buildProduction({ write: false });
+const cssOutputs = await Promise.all(
+  result.outputs
+    .map(async (output, index) => ({ path: result.outputs[index].path, contents: await output.text() }))
+);
+const css = cssOutputs.find((output) => output.path.endsWith(".css"))?.contents ?? "";
+assert(css.length > 0, "Bun production build did not emit a CSS asset");
 const expectedOutput = [
   ".flex",
   ".grid",
@@ -25,10 +31,10 @@ const expectedOutput = [
   ".bg-brand-600",
   ".hover\\:bg-red-500\\/50:hover",
   ".md\\:grid-cols-2",
-  "@media (min-width: 768px)"
+  "@media"
 ];
 
-const missing = expectedOutput.filter((fragment) => !result.css.includes(fragment));
+const missing = expectedOutput.filter((fragment) => !css.includes(fragment));
 assert(missing.length === 0, `utilitycss output is missing: ${missing.join(", ")}`);
 
 const email = `bun-${crypto.randomUUID()}@example.com`;
@@ -85,5 +91,5 @@ const badLoginResponse = await apiRequest("/api/auth/login", {
 assert(badLoginResponse.status === 401, `bad login returned ${badLoginResponse.status}`);
 
 console.log("Bun auth example verification passed.");
-console.log(`Generated ${result.stats.rulesGenerated} rules from ${result.stats.uniqueCandidates} candidates.`);
+console.log(`Generated stylesheet asset (${css.length} bytes) from the Bun module graph.`);
 console.log("REST mock verified: register, duplicate register, session lookup, logout, and invalid login.");

@@ -1,4 +1,10 @@
-import { WasmCompiler } from "../target/wasm-bindgen/utilitycss_wasm.js";
+import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const bindingsDirectory = process.env.UTILITYCSS_WASM_BINDINGS
+  ? process.env.UTILITYCSS_WASM_BINDINGS
+  : fileURLToPath(new URL("../target/wasm-bindgen", import.meta.url));
+const { WasmCompiler } = await import(pathToFileURL(join(bindingsDirectory, "utilitycss_wasm.js")).href);
 const compiler = new WasmCompiler(false);
 compiler.update_source("src/app.html", '<div class="p-4"></div>');
 const first = compiler.build();

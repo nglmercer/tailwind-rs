@@ -5,14 +5,17 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace=@utilitycss/node && npm run build --workspace=@utilitycss/vite && npm run build --workspace=@utilitycss/wasm",
+    "build": "npm run build --workspace=@utilitycss/node && npm run build --workspace=@utilitycss/bun && npm run build --workspace=@utilitycss/vite && npm run build --workspace=@utilitycss/wasm",
     "build:native": "npm run build:native --workspace=@utilitycss/napi",
     "validate:packages": "node scripts/validate-package-content.mjs",
     "smoke:packed-node": "node scripts/smoke-packed-node.mjs",
+    "smoke:packed-bun": "node scripts/smoke-packed-bun.mjs",
     "smoke:vite": "node scripts/vite-build-smoke.mjs",
-    "lint": "npm run lint --workspace=@utilitycss/node && npm run build --workspace=@utilitycss/node && npm run lint --workspace=@utilitycss/vite && npm run lint --workspace=@utilitycss/wasm",
+    "release:check": "node scripts/release-check.mjs",
+    "test:bun": "npm test --workspace=@utilitycss/bun",
+    "lint": "npm run lint --workspace=@utilitycss/node && npm run build --workspace=@utilitycss/node && npm run lint --workspace=@utilitycss/bun && npm run lint --workspace=@utilitycss/vite && npm run lint --workspace=@utilitycss/wasm",
     "test": "npm run build --workspace=@utilitycss/node && npm run build --workspace=@utilitycss/vite && npm run build --workspace=@utilitycss/wasm && npm run test --workspace=@utilitycss/node && npm run test --workspace=@utilitycss/vite && npm run test --workspace=@utilitycss/wasm",
-    "typecheck": "npm run typecheck --workspace=@utilitycss/node && npm run build --workspace=@utilitycss/node && npm run typecheck --workspace=@utilitycss/vite && npm run typecheck --workspace=@utilitycss/wasm"
+    "typecheck": "npm run typecheck --workspace=@utilitycss/node && npm run build --workspace=@utilitycss/node && npm run typecheck --workspace=@utilitycss/bun && npm run typecheck --workspace=@utilitycss/vite && npm run typecheck --workspace=@utilitycss/wasm"
   },
   "devDependencies": {
     "vite": "8.2.2"

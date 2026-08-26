@@ -3,8 +3,9 @@
 use std::hint::black_box;
 use std::time::Instant;
 
+use utilitycss_compiler::{Compiler, CompilerConfig, SourceInput};
 use utilitycss_scanner::scan;
-use utilitycss_span::Span;
+use utilitycss_span::{SourceId, Span};
 use utilitycss_swc::{extract as extract_swc, SourceKind};
 use utilitycss_syntax::parse;
 
@@ -14,6 +15,7 @@ fn main() {
     benchmark_spans(ITERATIONS);
     benchmark_scan_and_parse(ITERATIONS);
     benchmark_swc_extraction(ITERATIONS / 10);
+    benchmark_compiler(ITERATIONS / 100);
 }
 
 fn benchmark_swc_extraction(iterations: u32) {
@@ -65,4 +67,45 @@ fn benchmark_scan_and_parse(iterations: u32) {
     println!(
         "scan+parse: {iterations} iterations in {elapsed:?} (scanned={scanned}, parsed={parsed})"
     );
+}
+
+fn benchmark_compiler(iterations: u32) {
+    let source_id = SourceId::new("src/app.html");
+    let source = r#"<main class="flex gap-4 p-4 hover:bg-red-500/50 md:grid"></main>"#;
+
+    let started = Instant::now();
+    let mut css_bytes = 0_u64;
+    for _ in 0..iterations {
+        let mut compiler = Compiler::new(CompilerConfig::new());
+        compiler
+            .update_source(SourceInput::new(source_id.clone(), black_box(source)))
+            .expect("benchmark source is valid");
+        css_bytes = css_bytes.wrapping_add(compiler.build().css().len() as u64);
+    }
+    println!(
+        "cold compile: {iterations} iterations in {:?} (css-bytes={css_bytes})",
+        started.elapsed()
+    );
+
+    let mut compiler = Compiler::new(CompilerConfig::new());
+    compiler
+        .update_source(SourceInput::new(source_id.clone(), source))
+        .expect("benchmark source is valid");
+    black_box(compiler.build());
+
+    let started = Instant::now();
+    for index in 0..iterations {
+        let content = if index % 2 == 0 { source } else { "<main class=\"flex p-8\"></main>" };
+        compiler
+            .update_source(SourceInput::new(source_id.clone(), black_box(content)))
+            .expect("benchmark source is valid");
+        black_box(compiler.build());
+    }
+    println!("incremental rebuild: {iterations} iterations in {:?}", started.elapsed());
+
+    let started = Instant::now();
+    for _ in 0..iterations {
+        black_box(compiler.build());
+    }
+    println!("no-op rebuild: {iterations} iterations in {:?}", started.elapsed());
 }

@@ -9,6 +9,7 @@ use napi::{Error, Result, Status};
 use napi_derive::napi;
 use utilitycss_compiler::{CandidateInput, Compiler as CoreCompiler, CompilerConfig, SourceInput};
 use utilitycss_css_ir::CssSerializationMode;
+use utilitycss_diagnostics::Severity;
 use utilitycss_extractor::{extract_for_framework, Framework};
 use utilitycss_span::{SourceId, Span};
 use utilitycss_swc::{extract as extract_swc, SourceKind as SwcSourceKind};
@@ -16,6 +17,8 @@ use utilitycss_swc::{extract as extract_swc, SourceKind as SwcSourceKind};
 /// A diagnostic returned across the N-API boundary.
 #[napi(object)]
 pub struct JsDiagnostic {
+    /// Stable severity name.
+    pub severity: String,
     /// Stable diagnostic code.
     pub code: String,
     /// Human-readable diagnostic message.
@@ -26,6 +29,8 @@ pub struct JsDiagnostic {
     pub start: Option<u32>,
     /// Optional exclusive end byte offset.
     pub end: Option<u32>,
+    /// Optional actionable help text.
+    pub help: Option<String>,
 }
 
 /// A statically extracted candidate accepted by the batched source update API.
@@ -166,11 +171,18 @@ impl Compiler {
             .diagnostics()
             .iter()
             .map(|diagnostic| JsDiagnostic {
+                severity: match diagnostic.severity() {
+                    Severity::Error => "error".to_owned(),
+                    Severity::Warning => "warning".to_owned(),
+                    Severity::Note => "note".to_owned(),
+                    Severity::Help => "help".to_owned(),
+                },
                 code: diagnostic.code().to_string(),
                 message: diagnostic.message().to_owned(),
                 source: diagnostic.source().map(ToString::to_string),
                 start: diagnostic.span().map(|span| span.start()),
                 end: diagnostic.span().map(|span| span.end()),
+                help: diagnostic.help().map(str::to_owned),
             })
             .collect();
         let stats = output.stats();
@@ -204,8 +216,9 @@ fn source_kind(path: Option<&str>) -> SourceKind {
     let extension = path
         .map(std::path::Path::new)
         .and_then(std::path::Path::extension)
-        .and_then(|extension| extension.to_str());
-    match extension {
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase);
+    match extension.as_deref() {
         Some("js") | Some("mjs") | Some("cjs") => SourceKind::JavaScript(SwcSourceKind::JavaScript),
         Some("jsx") | Some("mjsx") | Some("cjsx") => SourceKind::JavaScript(SwcSourceKind::Jsx),
         Some("ts") | Some("mts") | Some("cts") => SourceKind::JavaScript(SwcSourceKind::TypeScript),

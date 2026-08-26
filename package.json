@@ -7,8 +7,14 @@
   "scripts": {
     "build": "npm run build --workspace=@utilitycss/node && npm run build --workspace=@utilitycss/vite && npm run build --workspace=@utilitycss/wasm",
     "build:native": "npm run build:native --workspace=@utilitycss/napi",
-    "lint": "npm run lint --workspace=@utilitycss/node && npm run lint --workspace=@utilitycss/vite && npm run lint --workspace=@utilitycss/wasm",
-    "test": "npm run test --workspace=@utilitycss/node && npm run test --workspace=@utilitycss/vite && npm run test --workspace=@utilitycss/wasm",
-    "typecheck": "npm run typecheck --workspace=@utilitycss/node && npm run typecheck --workspace=@utilitycss/vite && npm run typecheck --workspace=@utilitycss/wasm"
+    "validate:packages": "node scripts/validate-package-content.mjs",
+    "smoke:packed-node": "node scripts/smoke-packed-node.mjs",
+    "smoke:vite": "node scripts/vite-build-smoke.mjs",
+    "lint": "npm run lint --workspace=@utilitycss/node && npm run build --workspace=@utilitycss/node && npm run lint --workspace=@utilitycss/vite && npm run lint --workspace=@utilitycss/wasm",
+    "test": "npm run build --workspace=@utilitycss/node && npm run build --workspace=@utilitycss/vite && npm run build --workspace=@utilitycss/wasm && npm run test --workspace=@utilitycss/node && npm run test --workspace=@utilitycss/vite && npm run test --workspace=@utilitycss/wasm",
+    "typecheck": "npm run typecheck --workspace=@utilitycss/node && npm run build --workspace=@utilitycss/node && npm run typecheck --workspace=@utilitycss/vite && npm run typecheck --workspace=@utilitycss/wasm"
+  },
+  "devDependencies": {
+    "vite": "8.2.2"
   }
 }

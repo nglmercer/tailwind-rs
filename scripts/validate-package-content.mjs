@@ -1,0 +1,41 @@
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+
+const npm = process.env.npm_execpath
+  ? [process.execPath, process.env.npm_execpath]
+  : process.platform === "win32"
+    ? [process.execPath, join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js")]
+    : ["npm"];
+const packages = [
+  { name: "@utilitycss/napi", cwd: "packages/utilitycss-napi" },
+  { name: "@utilitycss/node", cwd: "packages/utilitycss-node" },
+  { name: "@utilitycss/vite", cwd: "packages/utilitycss-vite" },
+  { name: "@utilitycss/wasm", cwd: "packages/utilitycss-wasm" },
+  { name: "@utilitycss/napi-darwin-arm64", cwd: "packages/utilitycss-napi/npm/darwin-arm64" },
+  { name: "@utilitycss/napi-darwin-x64", cwd: "packages/utilitycss-napi/npm/darwin-x64" },
+  { name: "@utilitycss/napi-linux-x64-gnu", cwd: "packages/utilitycss-napi/npm/linux-x64-gnu" },
+  { name: "@utilitycss/napi-win32-x64-msvc", cwd: "packages/utilitycss-napi/npm/win32-x64-msvc" }
+];
+const forbidden = /(^|\/)(?:test|tests|fixtures|node_modules|\.git)(\/|$)|(?:\.log|\.map)$/;
+
+for (const { name, cwd } of packages) {
+  const metadata = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8"));
+  if (metadata.license !== "MIT OR Apache-2.0") {
+    throw new Error(`${name} does not declare the repository license`);
+  }
+  const output = execFileSync(npm[0], [...npm.slice(1), "pack", "--dry-run", "--json"], {
+    encoding: "utf8",
+    cwd
+  });
+  const result = JSON.parse(output)[0];
+  for (const entry of result.files) {
+    if (forbidden.test(entry.path)) {
+      throw new Error(`${name} contains forbidden package content: ${entry.path}`);
+    }
+  }
+  if (!result.files.some((entry) => entry.path === "package.json")) {
+    throw new Error(`${name} does not contain package.json`);
+  }
+  console.log(`${name}: ${result.files.length} files`);
+}

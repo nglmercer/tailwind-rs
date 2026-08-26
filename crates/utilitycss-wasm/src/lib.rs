@@ -1,5 +1,6 @@
 //! Thin WebAssembly bindings over the runtime-independent compiler facade.
 
+#![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
 use utilitycss_compiler::{Compiler, CompilerConfig, SourceInput};

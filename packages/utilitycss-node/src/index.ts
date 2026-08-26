@@ -2,11 +2,13 @@ import { createRequire } from "node:module";
 
 /** A diagnostic returned by the Rust compiler. */
 export interface Diagnostic {
+  readonly severity?: "error" | "warning" | "note" | "help";
   readonly code: string;
   readonly message: string;
   readonly source?: string;
   readonly start?: number;
   readonly end?: number;
+  readonly help?: string;
 }
 
 /** Work counters returned by a compiler build. */
@@ -127,11 +129,13 @@ function normalizeDiagnostic(value: unknown): Diagnostic {
     throw new Error("native compiler returned an invalid diagnostic");
   }
   return {
+    severity: optionalSeverity(value.severity),
     code: value.code,
     message: value.message,
     source: optionalString(value.source),
     start: optionalNumber(value.start),
-    end: optionalNumber(value.end)
+    end: optionalNumber(value.end),
+    help: optionalString(value.help)
   };
 }
 
@@ -174,4 +178,14 @@ function optionalString(value: unknown): string | undefined {
     throw new Error("native compiler returned a non-string diagnostic field");
   }
   return value;
+}
+
+function optionalSeverity(value: unknown): Diagnostic["severity"] {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (value === "error" || value === "warning" || value === "note" || value === "help") {
+    return value;
+  }
+  throw new Error("native compiler returned an invalid diagnostic severity");
 }

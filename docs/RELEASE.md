@@ -40,6 +40,21 @@ Bindings/adapters that communicate through serialized data should expose a proto
 - package smoke tests,
 - reproducible build checks where practical.
 
+## Artifact validation
+
+The native package uses N-API's platform-package layout. Each advertised target
+MUST be built in its native CI job. The CI workflow uploads those artifacts and
+assembles them in a separate packaging job. After all target artifacts are present,
+run `npm run prepare:release --workspace=@utilitycss/napi`; this copies binaries into
+the four `packages/utilitycss-napi/npm/*` packages and adds them as optional
+dependencies of the public `@utilitycss/napi` package. Publish those platform
+packages and the root package from the same immutable tag.
+
+Before publishing, run `cargo package --allow-dirty --workspace`,
+`npm run validate:packages`, and `npm run smoke:packed-node` in a clean checkout
+that contains a native artifact. The smoke test MUST install packed tarballs in
+a separate temporary project and compile CSS without workspace symlinks.
+
 ## Changelog categories
 
 - Added

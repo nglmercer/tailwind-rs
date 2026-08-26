@@ -4,6 +4,10 @@ description = "Source identity and half-open source spans for utilitycss."
 edition.workspace = true
 rust-version.workspace = true
 version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 
 [lints]
 workspace = true

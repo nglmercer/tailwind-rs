@@ -36,6 +36,8 @@ export interface JsCandidate {
 
 /** A diagnostic returned across the N-API boundary. */
 export interface JsDiagnostic {
+  /** Stable severity name. */
+  severity: string
   /** Stable diagnostic code. */
   code: string
   /** Human-readable diagnostic message. */
@@ -46,6 +48,8 @@ export interface JsDiagnostic {
   start?: number
   /** Optional exclusive end byte offset. */
   end?: number
+  /** Optional actionable help text. */
+  help?: string
 }
 
 /** Build counters returned across the N-API boundary. */

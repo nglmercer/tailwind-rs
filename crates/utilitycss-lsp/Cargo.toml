@@ -4,14 +4,19 @@ description = "Language Server Protocol adapter for utilitycss diagnostics and c
 edition.workspace = true
 rust-version.workspace = true
 version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 
 [dependencies]
 tokio = { version = "=1.53.1", features = ["io-std", "macros", "rt-multi-thread"] }
 tower-lsp = "=0.20.0"
-utilitycss-compiler = { path = "../utilitycss-compiler" }
-utilitycss-extractor = { path = "../utilitycss-extractor" }
-utilitycss-span = { path = "../utilitycss-span" }
-utilitycss-swc = { path = "../utilitycss-swc" }
+utilitycss-compiler = { version = "0.1.0", path = "../utilitycss-compiler" }
+utilitycss-diagnostics = { version = "0.1.0", path = "../utilitycss-diagnostics" }
+utilitycss-extractor = { version = "0.1.0", path = "../utilitycss-extractor" }
+utilitycss-span = { version = "0.1.0", path = "../utilitycss-span" }
+utilitycss-swc = { version = "0.1.0", path = "../utilitycss-swc" }
 
 [lints]
 workspace = true

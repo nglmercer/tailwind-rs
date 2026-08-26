@@ -4,17 +4,21 @@ description = "Native command-line interface for utilitycss."
 edition.workspace = true
 rust-version.workspace = true
 version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 
 [dependencies]
 clap = { version = "4.6.6", features = ["derive"] }
 notify = "8.2.0"
 walkdir = "2.5.0"
-utilitycss-css-ir = { path = "../utilitycss-css-ir" }
-utilitycss-compiler = { path = "../utilitycss-compiler" }
-utilitycss-config = { path = "../utilitycss-config" }
-utilitycss-extractor = { path = "../utilitycss-extractor" }
-utilitycss-swc = { path = "../utilitycss-swc" }
-utilitycss-span = { path = "../utilitycss-span" }
+utilitycss-css-ir = { version = "0.1.0", path = "../utilitycss-css-ir" }
+utilitycss-compiler = { version = "0.1.0", path = "../utilitycss-compiler" }
+utilitycss-config = { version = "0.1.0", path = "../utilitycss-config" }
+utilitycss-extractor = { version = "0.1.0", path = "../utilitycss-extractor" }
+utilitycss-swc = { version = "0.1.0", path = "../utilitycss-swc" }
+utilitycss-span = { version = "0.1.0", path = "../utilitycss-span" }
 
 [lints]
 workspace = true

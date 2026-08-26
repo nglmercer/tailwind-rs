@@ -21,6 +21,7 @@ use tower_lsp::{
     Client, LanguageServer,
 };
 use utilitycss_compiler::{CandidateInput, Compiler, SourceInput};
+use utilitycss_diagnostics::Severity;
 use utilitycss_extractor::{extract_for_framework, Framework};
 use utilitycss_span::{SourceId, Span};
 use utilitycss_swc::{extract as extract_swc, SourceKind as SwcSourceKind};
@@ -176,11 +177,19 @@ fn compile_document(state: &mut ServerState, uri: &Url, content: &str) -> Vec<Ls
                 range: span
                     .map(|span| lsp_range(content, span))
                     .unwrap_or_else(|| lsp_range(content, Span::empty(0))),
-                severity: Some(DiagnosticSeverity::ERROR),
+                severity: Some(match diagnostic.severity() {
+                    Severity::Error => DiagnosticSeverity::ERROR,
+                    Severity::Warning => DiagnosticSeverity::WARNING,
+                    Severity::Note => DiagnosticSeverity::INFORMATION,
+                    Severity::Help => DiagnosticSeverity::HINT,
+                }),
                 code: Some(tower_lsp::lsp_types::NumberOrString::String(
                     diagnostic.code().to_string(),
                 )),
-                message: diagnostic.message().to_owned(),
+                message: diagnostic.help().map_or_else(
+                    || diagnostic.message().to_owned(),
+                    |help| format!("{} ({help})", diagnostic.message()),
+                ),
                 ..Default::default()
             }
         })
@@ -212,7 +221,11 @@ enum FileKind {
 }
 
 fn file_kind(path: &str) -> FileKind {
-    match Path::new(path).extension().and_then(|extension| extension.to_str()) {
+    let extension = Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase);
+    match extension.as_deref() {
         Some("js") | Some("mjs") | Some("cjs") => FileKind::JavaScript(SwcSourceKind::JavaScript),
         Some("jsx") | Some("mjsx") | Some("cjsx") => FileKind::JavaScript(SwcSourceKind::Jsx),
         Some("ts") | Some("mts") | Some("cts") => FileKind::JavaScript(SwcSourceKind::TypeScript),
@@ -298,7 +311,7 @@ mod tests {
         compile_document, file_kind, lsp_range, offset_at, position_at, word_at_position, FileKind,
         ServerState,
     };
-    use tower_lsp::lsp_types::{Position, Url};
+    use tower_lsp::lsp_types::{NumberOrString, Position, Url};
     use utilitycss_span::Span;
 
     #[test]
@@ -353,7 +366,10 @@ mod tests {
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(
-            diagnostics[0].code.as_ref().map(ToString::to_string),
+            diagnostics[0].code.as_ref().map(|code| match code {
+                NumberOrString::String(code) => code.clone(),
+                NumberOrString::Number(code) => code.to_string(),
+            }),
             Some("syntax.empty-arbitrary-value".to_owned())
         );
         assert_eq!(diagnostics[0].range.start.line, 0);

@@ -65,6 +65,7 @@ The Vite adapter should:
 
 - initialize one compiler instance,
 - translate file changes into incremental updates,
+- remove source state from watcher delete notifications,
 - invalidate virtual CSS modules as needed,
 - preserve source errors,
 - keep dev and build semantics aligned.

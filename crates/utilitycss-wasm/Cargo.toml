@@ -4,14 +4,18 @@ description = "Thin WebAssembly binding for the utilitycss compiler facade."
 edition.workspace = true
 rust-version.workspace = true
 version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-utilitycss-compiler = { path = "../utilitycss-compiler" }
-utilitycss-css-ir = { path = "../utilitycss-css-ir" }
-utilitycss-span = { path = "../utilitycss-span" }
+utilitycss-compiler = { version = "0.1.0", path = "../utilitycss-compiler" }
+utilitycss-css-ir = { version = "0.1.0", path = "../utilitycss-css-ir" }
+utilitycss-span = { version = "0.1.0", path = "../utilitycss-span" }
 wasm-bindgen = "0.2"
 
 [lints]

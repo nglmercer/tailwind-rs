@@ -4,6 +4,10 @@ description = "Thin N-API binding for the utilitycss compiler facade."
 edition.workspace = true
 rust-version.workspace = true
 version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -11,11 +15,12 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 napi = { version = "3.12.2", features = ["napi9"] }
 napi-derive = "3.6.3"
-utilitycss-compiler = { path = "../utilitycss-compiler" }
-utilitycss-css-ir = { path = "../utilitycss-css-ir" }
-utilitycss-extractor = { path = "../utilitycss-extractor" }
-utilitycss-span = { path = "../utilitycss-span" }
-utilitycss-swc = { path = "../utilitycss-swc" }
+utilitycss-compiler = { version = "0.1.0", path = "../utilitycss-compiler" }
+utilitycss-css-ir = { version = "0.1.0", path = "../utilitycss-css-ir" }
+utilitycss-diagnostics = { version = "0.1.0", path = "../utilitycss-diagnostics" }
+utilitycss-extractor = { version = "0.1.0", path = "../utilitycss-extractor" }
+utilitycss-span = { version = "0.1.0", path = "../utilitycss-span" }
+utilitycss-swc = { version = "0.1.0", path = "../utilitycss-swc" }
 
 [build-dependencies]
 napi-build = "2.4.1"

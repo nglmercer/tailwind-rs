@@ -14,7 +14,7 @@ use std::{
 };
 
 use clap::{Args, CommandFactory, Parser, Subcommand};
-use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{Config as NotifyConfig, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use utilitycss_compiler::{Compiler, CompilerConfig, SourceInput};
 use utilitycss_config::ConfigFile;
 use utilitycss_css_ir::CssSerializationMode;
@@ -180,7 +180,7 @@ fn parse_options(arguments: Vec<String>, watch: bool) -> Result<Options, CliErro
 
 fn run_build(options: &Options) -> Result<(), CliError> {
     let mut compiler = make_compiler(options)?;
-    let files = collect_files(&options.inputs)?;
+    let files = collect_files(&options.inputs, options.output.as_deref())?;
     for path in files {
         update_file(&mut compiler, &path)?;
     }
@@ -190,7 +190,7 @@ fn run_build(options: &Options) -> Result<(), CliError> {
 fn run_watch(options: Options) -> Result<(), CliError> {
     let mut compiler = make_compiler(&options)?;
     let mut known = BTreeMap::<PathBuf, ()>::new();
-    refresh_sources(&mut compiler, &options.inputs, &mut known)?;
+    refresh_sources(&mut compiler, &options.inputs, options.output.as_deref(), &mut known)?;
     emit(&mut compiler, &options)?;
     if options.once {
         return Ok(());
@@ -214,9 +214,24 @@ fn run_watch(options: Options) -> Result<(), CliError> {
     }
     loop {
         match receiver.recv_timeout(options.interval) {
-            Ok(Ok(_event)) => {
-                while receiver.try_recv().is_ok() {}
-                refresh_sources(&mut compiler, &options.inputs, &mut known)?;
+            Ok(Ok(event)) => {
+                let mut events = vec![event];
+                while let Ok(result) = receiver.try_recv() {
+                    match result {
+                        Ok(event) => events.push(event),
+                        Err(error) => {
+                            return Err(CliError::Usage(format!("file watcher error: {error}")))
+                        }
+                    }
+                }
+                for event in events {
+                    apply_watch_event(
+                        &mut compiler,
+                        &event,
+                        options.output.as_deref(),
+                        &mut known,
+                    )?;
+                }
                 emit(&mut compiler, &options)?;
             }
             Ok(Err(error)) => return Err(CliError::Usage(format!("file watcher error: {error}"))),
@@ -231,9 +246,10 @@ fn run_watch(options: Options) -> Result<(), CliError> {
 fn refresh_sources(
     compiler: &mut Compiler,
     inputs: &[PathBuf],
+    output: Option<&Path>,
     known: &mut BTreeMap<PathBuf, ()>,
 ) -> Result<(), CliError> {
-    let files = collect_files(inputs)?;
+    let files = collect_files(inputs, output)?;
     for path in &files {
         update_file(compiler, path)?;
     }
@@ -241,9 +257,48 @@ fn refresh_sources(
     let removed =
         known.keys().filter(|path| !current.contains_key(*path)).cloned().collect::<Vec<_>>();
     for path in removed {
-        compiler.remove_source(&SourceId::new(path.to_string_lossy().into_owned()));
+        compiler.remove_source(&SourceId::new(source_id(&path)));
     }
     *known = current;
+    Ok(())
+}
+
+fn apply_watch_event(
+    compiler: &mut Compiler,
+    event: &Event,
+    output: Option<&Path>,
+    known: &mut BTreeMap<PathBuf, ()>,
+) -> Result<(), CliError> {
+    if event.paths.is_empty() {
+        return Ok(());
+    }
+
+    for path in &event.paths {
+        let key = stable_path(path);
+        let output_key = output.map(stable_path);
+        let is_output = output_key.as_ref().is_some_and(|output| output == &key);
+        let is_file = path.is_file();
+        let is_supported = is_supported_source(path);
+
+        if is_output || !is_supported || !is_file {
+            let removed = known
+                .keys()
+                .filter(|known_path| {
+                    known_path.as_path() == key.as_path() || known_path.starts_with(&key)
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            for removed_path in removed {
+                known.remove(&removed_path);
+                compiler.remove_source(&SourceId::new(source_id(&removed_path)));
+            }
+            continue;
+        }
+
+        update_file(compiler, &key)?;
+        known.insert(key, ());
+    }
+
     Ok(())
 }
 
@@ -266,11 +321,12 @@ fn make_compiler(options: &Options) -> Result<Compiler, CliError> {
 fn update_file(compiler: &mut Compiler, path: &Path) -> Result<(), CliError> {
     let content = fs::read_to_string(path)
         .map_err(|source| CliError::Io { path: path.to_owned(), source })?;
-    let source_id = SourceId::new(path.to_string_lossy().into_owned());
+    let stable_source_id = source_id(path);
+    let source_id = SourceId::new(stable_source_id.clone());
     let candidates = extract_candidates(path, &content)?;
     compiler
         .update_source_with_candidates(
-            SourceInput::new(source_id, content).with_path(path.to_string_lossy().into_owned()),
+            SourceInput::new(source_id, content).with_path(stable_source_id),
             candidates,
         )
         .map_err(CliError::Compiler)
@@ -280,8 +336,9 @@ fn extract_candidates(
     path: &Path,
     content: &str,
 ) -> Result<Vec<utilitycss_compiler::CandidateInput>, CliError> {
-    let extension = path.extension().and_then(|extension| extension.to_str());
-    let candidates = match extension {
+    let extension =
+        path.extension().and_then(|extension| extension.to_str()).map(str::to_ascii_lowercase);
+    let candidates = match extension.as_deref() {
         Some("js") | Some("mjs") | Some("cjs") => extract_swc(content, SwcSourceKind::JavaScript)
             .map_err(|error| CliError::Extraction(error.to_string()))?
             .into_iter()
@@ -368,25 +425,96 @@ fn emit(compiler: &mut Compiler, options: &Options) -> Result<(), CliError> {
     }
 }
 
-fn collect_files(inputs: &[PathBuf]) -> Result<Vec<PathBuf>, CliError> {
+fn collect_files(inputs: &[PathBuf], output: Option<&Path>) -> Result<Vec<PathBuf>, CliError> {
     let mut files = BTreeMap::new();
     for input in inputs {
-        collect_path(input, &mut files)?;
+        collect_path(input, output, &mut files)?;
     }
     Ok(files.into_keys().collect())
 }
 
-fn collect_path(path: &Path, files: &mut BTreeMap<PathBuf, ()>) -> Result<(), CliError> {
-    for entry in WalkDir::new(path).follow_links(false) {
+fn collect_path(
+    path: &Path,
+    output: Option<&Path>,
+    files: &mut BTreeMap<PathBuf, ()>,
+) -> Result<(), CliError> {
+    let output = output.map(stable_path);
+    let mut entries = WalkDir::new(path).follow_links(false).into_iter();
+    while let Some(entry) = entries.next() {
         let entry = entry.map_err(|error| CliError::Io {
             path: error.path().map_or_else(|| path.to_owned(), Path::to_owned),
             source: io::Error::other(error.to_string()),
         })?;
-        if entry.file_type().is_file() {
-            files.insert(entry.path().to_owned(), ());
+        if entry.file_type().is_dir() && is_ignored_directory(entry.path()) {
+            entries.skip_current_dir();
+            continue;
+        }
+        if entry.file_type().is_file()
+            && is_supported_source(entry.path())
+            && output.as_ref().is_none_or(|output| stable_path(entry.path()) != *output)
+        {
+            files.insert(stable_path(entry.path()), ());
         }
     }
     Ok(())
+}
+
+fn is_supported_source(path: &Path) -> bool {
+    let Some(extension) = path.extension().and_then(|extension| extension.to_str()) else {
+        return false;
+    };
+    matches!(
+        extension.to_ascii_lowercase().as_str(),
+        "html"
+            | "htm"
+            | "js"
+            | "mjs"
+            | "cjs"
+            | "jsx"
+            | "mjsx"
+            | "cjsx"
+            | "ts"
+            | "mts"
+            | "cts"
+            | "tsx"
+            | "mtsx"
+            | "ctsx"
+            | "vue"
+            | "svelte"
+            | "astro"
+    )
+}
+
+fn is_ignored_directory(path: &Path) -> bool {
+    path.components().any(|component| {
+        let name = component.as_os_str().to_string_lossy();
+        matches!(
+            name.to_ascii_lowercase().as_str(),
+            ".git"
+                | "node_modules"
+                | "target"
+                | "dist"
+                | "build"
+                | "coverage"
+                | ".next"
+                | ".nuxt"
+                | ".svelte-kit"
+        )
+    })
+}
+
+fn stable_path(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| {
+        if path.is_absolute() {
+            path.to_owned()
+        } else {
+            env::current_dir().map_or_else(|_| path.to_owned(), |current| current.join(path))
+        }
+    })
+}
+
+fn source_id(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
 }
 
 fn usage(message: impl Into<String>) -> CliError {
@@ -399,9 +527,13 @@ fn print_help() {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
-    use super::{parse_options, run, CssSerializationMode};
+    use super::{collect_files, parse_options, run, stable_path, CssSerializationMode};
 
     #[test]
     fn parses_build_options_and_positional_inputs() {
@@ -417,5 +549,31 @@ mod tests {
     #[test]
     fn help_is_available_without_a_workspace() {
         run(["help".to_owned()]).expect("help does not require inputs");
+    }
+
+    #[test]
+    fn collection_skips_binary_and_generated_directories_and_output_files() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is after the Unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("utilitycss-cli-{suffix}"));
+        let output = root.join("src/generated.html");
+        fs::create_dir_all(root.join("src")).expect("test source directory is created");
+        fs::create_dir_all(root.join("node_modules/pkg")).expect("ignored directory is created");
+        fs::create_dir_all(root.join("target")).expect("ignored directory is created");
+        fs::write(root.join("src/input.html"), "<div class=\"p-4\"></div>")
+            .expect("source is written");
+        fs::write(&output, "p-4{padding:1rem}").expect("generated output is written");
+        fs::write(root.join("src/image.bin"), [0_u8, 159, 146, 150]).expect("binary is written");
+        fs::write(root.join("node_modules/pkg/ignored.html"), "p-8")
+            .expect("ignored source is written");
+        fs::write(root.join("target/ignored.html"), "p-8").expect("ignored source is written");
+
+        let files =
+            collect_files(std::slice::from_ref(&root), Some(&output)).expect("collection succeeds");
+        assert_eq!(files, vec![stable_path(&root.join("src/input.html"))]);
+
+        fs::remove_dir_all(root).expect("test directory is removed");
     }
 }

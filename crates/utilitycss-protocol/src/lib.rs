@@ -11,10 +11,11 @@ use std::{error::Error, fmt};
 use serde::{Deserialize, Serialize};
 use utilitycss_compiler::{CandidateInput, Compiler, CompilerConfig, SourceInput};
 use utilitycss_css_ir::CssSerializationMode;
+use utilitycss_diagnostics::Severity;
 use utilitycss_span::{SourceId, Span};
 
 /// Current request/response schema version.
-pub const PROTOCOL_VERSION: u16 = 1;
+pub const PROTOCOL_VERSION: u16 = 2;
 
 /// A candidate supplied by an AST-assisted host extractor.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -66,6 +67,8 @@ pub enum ProtocolRequest {
 /// A structured diagnostic transported across process or runtime boundaries.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ProtocolDiagnostic {
+    /// Stable severity name.
+    pub severity: String,
     /// Stable diagnostic code.
     pub code: String,
     /// Human-readable diagnostic message.
@@ -76,6 +79,8 @@ pub struct ProtocolDiagnostic {
     pub start: Option<u32>,
     /// Optional exclusive end byte offset.
     pub end: Option<u32>,
+    /// Optional actionable help text.
+    pub help: Option<String>,
 }
 
 /// Build counters transported across process or runtime boundaries.
@@ -269,11 +274,18 @@ fn build_result(compiler: &mut Compiler) -> ProtocolBuildResult {
         .diagnostics()
         .iter()
         .map(|diagnostic| ProtocolDiagnostic {
+            severity: match diagnostic.severity() {
+                Severity::Error => "error".to_owned(),
+                Severity::Warning => "warning".to_owned(),
+                Severity::Note => "note".to_owned(),
+                Severity::Help => "help".to_owned(),
+            },
             code: diagnostic.code().to_string(),
             message: diagnostic.message().to_owned(),
             source: diagnostic.source().map(ToString::to_string),
             start: diagnostic.span().map(|span| span.start()),
             end: diagnostic.span().map(|span| span.end()),
+            help: diagnostic.help().map(str::to_owned),
         })
         .collect();
     let stats = output.stats();
@@ -334,9 +346,9 @@ mod tests {
     fn json_round_trip_uses_stable_field_names() {
         let mut session = ProtocolSession::new();
         let response = session
-            .handle_json(r#"{"type":"initialize","protocolVersion":1,"pretty":true}"#)
+            .handle_json(r#"{"type":"initialize","protocolVersion":2,"pretty":true}"#)
             .expect("request is valid");
 
-        assert_eq!(response, r#"{"type":"initialized","protocolVersion":1}"#);
+        assert_eq!(response, r#"{"type":"initialized","protocolVersion":2}"#);
     }
 }

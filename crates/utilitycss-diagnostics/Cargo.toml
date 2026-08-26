@@ -4,9 +4,13 @@ description = "Typed, source-aware diagnostics for utilitycss."
 edition.workspace = true
 rust-version.workspace = true
 version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 
 [dependencies]
-utilitycss-span = { path = "../utilitycss-span" }
+utilitycss-span = { version = "0.1.0", path = "../utilitycss-span" }
 
 [lints]
 workspace = true

@@ -2,6 +2,8 @@
   "name": "@utilitycss/node",
   "version": "0.1.0",
   "description": "Thin Node.js adapter for the utilitycss native compiler binding.",
+  "license": "MIT OR Apache-2.0",
+  "repository": "https://github.com/nglmercer/tailwind-rs",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -11,6 +13,7 @@
       "import": "./dist/index.js"
     }
   },
+  "files": ["dist"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "tsc -p tsconfig.json --noEmit",

@@ -4,14 +4,18 @@ description = "SWC AST-backed extraction for JavaScript, TypeScript, JSX, and TS
 edition.workspace = true
 rust-version.workspace = true
 version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 
 [dependencies]
 swc_common = "=26.0.0"
 swc_ecma_ast = "=29.0.0"
 swc_ecma_parser = { version = "=45.0.1", default-features = false, features = ["typescript"] }
 swc_ecma_visit = "=29.0.0"
-utilitycss-scanner = { path = "../utilitycss-scanner" }
-utilitycss-span = { path = "../utilitycss-span" }
+utilitycss-scanner = { version = "0.1.0", path = "../utilitycss-scanner" }
+utilitycss-span = { version = "0.1.0", path = "../utilitycss-span" }
 
 [dev-dependencies]
 proptest = "=1.11.0"

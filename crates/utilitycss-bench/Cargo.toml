@@ -1,15 +1,20 @@
 [package]
 name = "utilitycss-bench"
-description = "Dependency-free benchmark harness for utilitycss foundation work."
+description = "Deterministic benchmark harness for utilitycss compiler and foundation work."
 edition.workspace = true
 rust-version.workspace = true
 version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 
 [dependencies]
-utilitycss-scanner = { path = "../utilitycss-scanner" }
-utilitycss-span = { path = "../utilitycss-span" }
-utilitycss-syntax = { path = "../utilitycss-syntax" }
-utilitycss-swc = { path = "../utilitycss-swc" }
+utilitycss-compiler = { version = "0.1.0", path = "../utilitycss-compiler" }
+utilitycss-scanner = { version = "0.1.0", path = "../utilitycss-scanner" }
+utilitycss-span = { version = "0.1.0", path = "../utilitycss-span" }
+utilitycss-syntax = { version = "0.1.0", path = "../utilitycss-syntax" }
+utilitycss-swc = { version = "0.1.0", path = "../utilitycss-swc" }
 
 [[bench]]
 name = "foundation"

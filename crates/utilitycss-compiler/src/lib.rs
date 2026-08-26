@@ -480,6 +480,7 @@ impl Compiler {
         }
         if remove_candidate {
             self.candidate_sources.remove(raw);
+            self.candidate_cache.remove(raw);
             self.pending_stats.rules_removed += 1;
         }
     }
@@ -656,6 +657,32 @@ mod tests {
         let removed = compiler.build();
         assert_eq!(removed.css(), "");
         assert!(removed.stats().rules_removed() > 0);
+    }
+
+    #[test]
+    fn inactive_candidate_cache_entries_are_evicted() {
+        let id = SourceId::new("src/generated.html");
+        let mut compiler = Compiler::new(CompilerConfig::new());
+
+        for cycle in 0..3 {
+            let content = (0..1_000)
+                .map(|index| format!("p-[{}px]", cycle * 1_000 + index))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let source = SourceInput::new(id.clone(), content);
+            compiler.update_source(source).expect("generated source is valid");
+            let populated = compiler.build();
+            assert_eq!(populated.stats().unique_candidates(), 1_000);
+            assert_eq!(compiler.candidate_cache.len(), 1_000);
+
+            compiler
+                .update_source(SourceInput::new(id.clone(), ""))
+                .expect("replacement source is valid");
+            let empty = compiler.build();
+            assert_eq!(empty.css(), "");
+            assert_eq!(empty.stats().unique_candidates(), 0);
+            assert!(compiler.candidate_cache.is_empty());
+        }
     }
 
     #[test]

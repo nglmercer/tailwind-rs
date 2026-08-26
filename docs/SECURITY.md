@@ -60,4 +60,7 @@ All FFI boundaries should:
 
 ## Reporting
 
-Once public, add a private vulnerability reporting channel and security policy with supported versions.
+Use the repository's private GitHub vulnerability reporting form. Do not submit
+unpatched vulnerabilities through public issues or pull requests. The root
+`.github/SECURITY.md` policy defines supported versions and coordinated
+disclosure expectations.

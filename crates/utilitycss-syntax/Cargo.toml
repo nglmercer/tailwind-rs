@@ -4,10 +4,14 @@ description = "Borrowed abstract syntax tree and parser for the utilitycss class
 edition.workspace = true
 rust-version.workspace = true
 version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 
 [dependencies]
-utilitycss-diagnostics = { path = "../utilitycss-diagnostics" }
-utilitycss-span = { path = "../utilitycss-span" }
+utilitycss-diagnostics = { version = "0.1.0", path = "../utilitycss-diagnostics" }
+utilitycss-span = { version = "0.1.0", path = "../utilitycss-span" }
 
 [dev-dependencies]
 proptest = "=1.11.0"

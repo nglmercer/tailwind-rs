@@ -18,6 +18,8 @@ members = [
     "crates/utilitycss-css-ir",
     "crates/utilitycss-stylesheet",
     "crates/utilitycss-compiler",
+    "crates/utilitycss-introspect",
+    "crates/utilitycss-compat",
     "crates/utilitycss-cli",
     "crates/utilitycss-bench",
 ]
@@ -34,6 +36,8 @@ default-members = [
     "crates/utilitycss-css-ir",
     "crates/utilitycss-stylesheet",
     "crates/utilitycss-compiler",
+    "crates/utilitycss-introspect",
+    "crates/utilitycss-compat",
 ]
 
 [workspace.package]

@@ -9,6 +9,8 @@ export interface Diagnostic {
   readonly start?: number;
   readonly end?: number;
   readonly help?: string;
+  readonly explanation?: string;
+  readonly suggestions?: readonly string[];
 }
 
 /** Work counters returned by a compiler build. */
@@ -36,12 +38,18 @@ export interface StylesheetResult {
   readonly diagnostics: readonly Diagnostic[];
 }
 
+/** Machine-readable result returned by candidate introspection methods. */
+export type IntrospectionResult = Readonly<Record<string, unknown>>;
+
 /** The native compiler surface consumed by this adapter. */
 export interface NativeCompiler {
   updateSource(id: string, content: string, path?: string, candidates?: readonly CandidateInput[]): void;
   extractCandidates?(content: string, path?: string): readonly CandidateInput[];
   removeSource(id: string): boolean;
   build(): unknown;
+  explain?(candidate: string): unknown;
+  validate?(candidate: string): unknown;
+  capabilities?(): unknown;
   transformStylesheet?(id: string, content: string, path?: string): unknown;
 }
 
@@ -50,6 +58,8 @@ export interface CandidateInput {
   readonly raw: string;
   readonly start: number;
   readonly end: number;
+  /** Extraction mode that produced this candidate. */
+  readonly extractionMode?: "text" | "static" | "ast" | "hybrid";
 }
 
 /** A native compiler constructor, injectable for tests and alternate loaders. */
@@ -93,6 +103,33 @@ export class Compiler {
   public build(): BuildResult {
     this.assertActive();
     return normalizeBuildResult(this.native.build());
+  }
+
+  /** Explains one candidate through the native registry-backed introspection API. */
+  public explain(candidate: string): IntrospectionResult {
+    this.assertActive();
+    if (!this.native.explain) {
+      throw new Error("native compiler does not expose candidate explanation");
+    }
+    return normalizeIntrospectionResult(this.native.explain(candidate));
+  }
+
+  /** Validates one candidate through the native registry-backed introspection API. */
+  public validate(candidate: string): IntrospectionResult {
+    this.assertActive();
+    if (!this.native.validate) {
+      throw new Error("native compiler does not expose candidate validation");
+    }
+    return normalizeIntrospectionResult(this.native.validate(candidate));
+  }
+
+  /** Returns the active machine-readable capability manifest. */
+  public capabilities(): IntrospectionResult {
+    this.assertActive();
+    if (!this.native.capabilities) {
+      throw new Error("native compiler does not expose capability metadata");
+    }
+    return normalizeIntrospectionResult(this.native.capabilities());
   }
 
   /** Transforms authored CSS and normalizes native stylesheet diagnostics. */
@@ -150,11 +187,37 @@ function normalizeStylesheetResult(value: unknown): StylesheetResult {
   };
 }
 
+function normalizeIntrospectionResult(value: unknown): IntrospectionResult {
+  const parsed = typeof value === "string" ? parseJson(value) : value;
+  if (!isRecord(parsed)) {
+    throw new Error("native compiler returned an invalid introspection result");
+  }
+  return parsed;
+}
+
+function parseJson(value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    throw new Error("native compiler returned invalid introspection JSON");
+  }
+}
+
 function normalizeDiagnostic(value: unknown): Diagnostic {
   if (!isRecord(value) || typeof value.code !== "string" || typeof value.message !== "string") {
     throw new Error("native compiler returned an invalid diagnostic");
   }
-  return {
+  const diagnostic: {
+    severity?: Diagnostic["severity"];
+    code: string;
+    message: string;
+    source?: string;
+    start?: number;
+    end?: number;
+    help?: string;
+    explanation?: string;
+    suggestions?: string[];
+  } = {
     severity: optionalSeverity(value.severity),
     code: value.code,
     message: value.message,
@@ -163,6 +226,17 @@ function normalizeDiagnostic(value: unknown): Diagnostic {
     end: optionalNumber(value.end),
     help: optionalString(value.help)
   };
+  const explanation = optionalString(value.explanation);
+  if (explanation !== undefined) {
+    diagnostic.explanation = explanation;
+  }
+  if (value.suggestions !== undefined && value.suggestions !== null) {
+    if (!Array.isArray(value.suggestions) || !value.suggestions.every(item => typeof item === "string")) {
+      throw new Error("native compiler returned invalid diagnostic suggestions");
+    }
+    diagnostic.suggestions = value.suggestions as string[];
+  }
+  return diagnostic;
 }
 
 function normalizeStats(value: unknown): CompileStats {

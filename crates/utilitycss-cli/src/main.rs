@@ -15,10 +15,13 @@ use std::{
 
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use notify::{Config as NotifyConfig, Event, RecommendedWatcher, RecursiveMode, Watcher};
-use utilitycss_compiler::{Compiler, CompilerConfig, SourceInput};
+use utilitycss_compiler::{
+    CompatibilityProfile, Compiler, CompilerConfig, ExplainRequest, SourceInput,
+};
 use utilitycss_config::ConfigFile;
 use utilitycss_css_ir::CssSerializationMode;
 use utilitycss_extractor::{extract_for_framework, Framework};
+use utilitycss_scanner::ExtractionMode;
 use utilitycss_span::SourceId;
 use utilitycss_stylesheet::{transform_stylesheet, StylesheetInput};
 use utilitycss_swc::{extract as extract_swc, SourceKind as SwcSourceKind};
@@ -82,6 +85,40 @@ enum Command {
     Build(CommonArgs),
     /// Watch inputs and rebuild when files change.
     Watch(WatchArgs),
+    /// Explain one candidate using the active semantic registry.
+    Explain(CandidateArgs),
+    /// Validate one candidate using the active semantic registry.
+    Validate(CandidateArgs),
+    /// Generate machine-readable compiler capabilities and reference artifacts.
+    Capabilities(CapabilitiesArgs),
+}
+
+#[derive(Clone, Debug, Args)]
+struct CandidateArgs {
+    /// Candidate text to inspect.
+    candidate: String,
+    /// Read declarative JSON or CSS configuration.
+    #[arg(long, value_name = "PATH")]
+    config: Option<PathBuf>,
+    /// Compatibility profile used for reporting.
+    #[arg(long, default_value = "native")]
+    compatibility: String,
+    /// Emit the complete machine-readable result as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Clone, Debug, Args)]
+struct CapabilitiesArgs {
+    /// Read declarative JSON or CSS configuration.
+    #[arg(long, value_name = "PATH")]
+    config: Option<PathBuf>,
+    /// Write all generated artifacts into a directory.
+    #[arg(long, value_name = "DIR")]
+    output_dir: Option<PathBuf>,
+    /// Print the expanded LLM reference when no output directory is supplied.
+    #[arg(long)]
+    full: bool,
 }
 
 #[derive(Clone, Debug, Args)]
@@ -134,6 +171,14 @@ where
         print_help();
         return Ok(());
     }
+    if matches!(
+        arguments.first().map(String::as_str),
+        Some("explain" | "validate" | "capabilities")
+    ) {
+        let cli = Cli::try_parse_from(std::iter::once("utilitycss".to_owned()).chain(arguments))
+            .map_err(|error| usage(error.to_string()))?;
+        return run_introspection(cli.command);
+    }
     let watch = arguments.first().is_some_and(|argument| argument == "watch");
     if watch || arguments.first().is_some_and(|argument| argument == "build") {
         arguments.remove(0);
@@ -144,6 +189,142 @@ where
     } else {
         run_build(&options)
     }
+}
+
+fn run_introspection(command: Command) -> Result<(), CliError> {
+    match command {
+        Command::Explain(args) => {
+            let compiler = make_introspection_compiler(args.config.as_deref())?;
+            let compatibility = parse_compatibility(&args.compatibility);
+            let result = compiler
+                .explain(ExplainRequest::new(&args.candidate).with_compatibility(compatibility));
+            if args.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&result)
+                        .map_err(|error| usage(error.to_string()))?
+                );
+            } else {
+                println!("candidate: {}", result.candidate);
+                println!("status: {:?}", result.status);
+                println!("normalized: {}", result.normalized);
+                if let Some(css) = result.css {
+                    println!("css: {css}");
+                }
+                for diagnostic in result.diagnostics {
+                    println!(
+                        "{} [{}]: {}",
+                        diagnostic.severity, diagnostic.code, diagnostic.message
+                    );
+                    if let Some(help) = diagnostic.help {
+                        println!("  help: {help}");
+                    }
+                    if let Some(explanation) = diagnostic.explanation {
+                        println!("  explanation: {explanation}");
+                    }
+                    for suggestion in diagnostic.suggestions {
+                        println!("  suggestion: {} ({})", suggestion.candidate, suggestion.reason);
+                    }
+                }
+                for provenance in result.provenance {
+                    println!(
+                        "provenance: {}:{}{}",
+                        provenance.kind,
+                        provenance.key,
+                        provenance.detail.map_or_else(String::new, |detail| format!(" ({detail})"))
+                    );
+                }
+            }
+            Ok(())
+        }
+        Command::Validate(args) => {
+            let compiler = make_introspection_compiler(args.config.as_deref())?;
+            let compatibility = parse_compatibility(&args.compatibility);
+            let result = compiler
+                .validate(ExplainRequest::new(&args.candidate).with_compatibility(compatibility));
+            if args.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&result)
+                        .map_err(|error| usage(error.to_string()))?
+                );
+            } else {
+                println!("{}: {:?}", if result.valid { "valid" } else { "invalid" }, result.status);
+                for diagnostic in result.diagnostics {
+                    println!(
+                        "{} [{}]: {}",
+                        diagnostic.severity, diagnostic.code, diagnostic.message
+                    );
+                    if let Some(explanation) = diagnostic.explanation {
+                        println!("  explanation: {explanation}");
+                    }
+                    for suggestion in diagnostic.suggestions {
+                        println!("  suggestion: {} ({})", suggestion.candidate, suggestion.reason);
+                    }
+                }
+            }
+            if result.valid {
+                Ok(())
+            } else {
+                Err(CliError::Diagnostics)
+            }
+        }
+        Command::Capabilities(args) => {
+            let compiler = make_introspection_compiler(args.config.as_deref())?;
+            let artifacts = compiler.generated_artifacts();
+            if let Some(directory) = args.output_dir {
+                fs::create_dir_all(&directory)
+                    .map_err(|source| CliError::Io { path: directory.clone(), source })?;
+                write_artifact(&directory, "capabilities.json", &artifacts.capabilities_json)?;
+                write_artifact(&directory, "capabilities.schema.json", &artifacts.schema_json)?;
+                write_artifact(&directory, "REFERENCE.md", &artifacts.reference_markdown)?;
+                write_artifact(&directory, "llms.txt", &artifacts.llms_txt)?;
+                write_artifact(&directory, "llms-full.txt", &artifacts.llms_full_txt)?;
+                write_artifact(
+                    &directory,
+                    "compatibility-report.json",
+                    &artifacts.compatibility_report_json,
+                )?;
+            } else if args.full {
+                print!("{}", artifacts.llms_full_txt);
+            } else {
+                println!("{}", artifacts.capabilities_json);
+            }
+            Ok(())
+        }
+        Command::Build(_) | Command::Watch(_) => {
+            Err(usage("introspection command expected: explain, validate, or capabilities"))
+        }
+    }
+}
+
+fn make_introspection_compiler(config: Option<&Path>) -> Result<Compiler, CliError> {
+    let file = config
+        .map_or_else(|| Ok(ConfigFile::default()), utilitycss_config::load)
+        .map_err(CliError::Config)?;
+    Ok(Compiler::new(
+        CompilerConfig::new()
+            .with_theme(file.theme().clone())
+            .with_utility_registry(file.utilities().clone())
+            .with_variant_registry(file.variants().clone())
+            .with_preset_name(file.preset().name())
+            .with_browser_target(file.browser_target())
+            .with_serialization_mode(file.serialization_mode()),
+    ))
+}
+
+fn parse_compatibility(value: &str) -> CompatibilityProfile {
+    match value {
+        "native" => CompatibilityProfile::Native,
+        "tailwind-v4-like" | "tailwind-v4-subset" => CompatibilityProfile::TailwindV4Like,
+        "tailwind-v3-like" | "tailwind-v3-subset" => CompatibilityProfile::TailwindV3Like,
+        value => CompatibilityProfile::Custom(value.to_owned()),
+    }
+}
+
+fn write_artifact(directory: &Path, name: &str, content: &str) -> Result<(), CliError> {
+    let path = directory.join(name);
+    fs::write(&path, content.as_bytes()).map_err(|source| CliError::Io { path, source })
 }
 
 fn parse_options(arguments: Vec<String>, watch: bool) -> Result<Options, CliError> {
@@ -157,6 +338,9 @@ fn parse_options(arguments: Vec<String>, watch: bool) -> Result<Options, CliErro
         Command::Build(common) => (common, false, Duration::from_millis(250)),
         Command::Watch(watch) => {
             (watch.common, watch.once, Duration::from_millis(watch.interval_ms.max(1)))
+        }
+        Command::Explain(_) | Command::Validate(_) | Command::Capabilities(_) => {
+            return Err(usage("build or watch command expected"));
         }
     };
     let mut inputs = common.positional_inputs;
@@ -332,6 +516,8 @@ fn make_compiler(options: &Options) -> Result<Compiler, CliError> {
             .with_theme(file.theme().clone())
             .with_utility_registry(file.utilities().clone())
             .with_variant_registry(file.variants().clone())
+            .with_preset_name(file.preset().name())
+            .with_browser_target(file.browser_target())
             .with_serialization_mode(mode),
     ))
 }
@@ -394,9 +580,18 @@ fn extract_candidates(
             .map(|candidate| (candidate.raw(), candidate.span()))
             .collect::<Vec<_>>(),
     };
+    let mode = match extension.as_deref() {
+        Some("js") | Some("mjs") | Some("cjs") | Some("jsx") | Some("mjsx") | Some("cjsx")
+        | Some("ts") | Some("mts") | Some("cts") | Some("tsx") | Some("mtsx") | Some("ctsx") => {
+            ExtractionMode::Ast
+        }
+        _ => ExtractionMode::Static,
+    };
     Ok(candidates
         .into_iter()
-        .map(|(raw, span)| utilitycss_compiler::CandidateInput::new(raw, span))
+        .map(|(raw, span)| {
+            utilitycss_compiler::CandidateInput::new(raw, span).with_extraction_mode(mode)
+        })
         .collect())
 }
 

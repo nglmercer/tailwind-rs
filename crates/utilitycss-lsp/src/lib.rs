@@ -23,6 +23,7 @@ use tower_lsp::{
 use utilitycss_compiler::{CandidateInput, Compiler, SourceInput};
 use utilitycss_diagnostics::Severity;
 use utilitycss_extractor::{extract_for_framework, Framework};
+use utilitycss_scanner::ExtractionMode;
 use utilitycss_span::{SourceId, Span};
 use utilitycss_swc::{extract as extract_swc, SourceKind as SwcSourceKind};
 
@@ -107,25 +108,25 @@ impl LanguageServer for Backend {
     }
 
     async fn completion(&self, _: CompletionParams) -> Result<Option<CompletionResponse>> {
-        let items = [
-            ("flex", "display: flex"),
-            ("grid", "display: grid"),
-            ("hidden", "display: none"),
-            ("p-4", "padding: 1rem"),
-            ("gap-4", "gap: 1rem"),
-            ("rounded", "border-radius: 0.25rem"),
-            ("text-red-500", "color: #ef4444"),
-            ("bg-red-500", "background-color: #ef4444"),
-        ]
-        .into_iter()
-        .map(|(label, detail)| CompletionItem {
-            label: label.to_owned(),
-            kind: Some(CompletionItemKind::CLASS),
-            detail: Some(detail.to_owned()),
-            documentation: Some(Documentation::String("utilitycss built-in candidate".to_owned())),
-            ..Default::default()
-        })
-        .collect();
+        let items = self
+            .state
+            .lock()
+            .ok()
+            .map(|state| {
+                state
+                    .compiler
+                    .completions("")
+                    .into_iter()
+                    .map(|item| CompletionItem {
+                        label: item.label,
+                        kind: Some(CompletionItemKind::CLASS),
+                        detail: Some(item.detail),
+                        documentation: Some(Documentation::String(item.documentation)),
+                        ..Default::default()
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         Ok(Some(CompletionResponse::Array(items)))
     }
 
@@ -138,10 +139,19 @@ impl LanguageServer for Backend {
             .ok()
             .and_then(|state| state.documents.get(&uri).cloned())
             .and_then(|source| word_at_position(&source, position));
-        Ok(word.map(|word| Hover {
-            contents: HoverContents::Scalar(MarkedString::String(format!(
-                "utilitycss candidate `{word}`"
-            ))),
+        let Some(word) = word else {
+            return Ok(None);
+        };
+        let Some(info) = self.state.lock().ok().and_then(|state| state.compiler.hover(&word))
+        else {
+            return Ok(None);
+        };
+        let mut content = format!("{}\n\n`{}`", info.description, info.candidate);
+        if let Some(css) = info.css {
+            content.push_str(&format!("\n\n```css\n{css}\n```"));
+        }
+        Ok(Some(Hover {
+            contents: HoverContents::Scalar(MarkedString::String(content)),
             range: None,
         }))
     }
@@ -186,33 +196,53 @@ fn compile_document(state: &mut ServerState, uri: &Url, content: &str) -> Vec<Ls
                 code: Some(tower_lsp::lsp_types::NumberOrString::String(
                     diagnostic.code().to_string(),
                 )),
-                message: diagnostic.help().map_or_else(
-                    || diagnostic.message().to_owned(),
-                    |help| format!("{} ({help})", diagnostic.message()),
-                ),
+                message: lsp_diagnostic_message(diagnostic),
                 ..Default::default()
             }
         })
         .collect()
 }
 
+fn lsp_diagnostic_message(diagnostic: &utilitycss_diagnostics::Diagnostic) -> String {
+    let mut message = diagnostic.message().to_owned();
+    if let Some(help) = diagnostic.help() {
+        message.push_str(&format!(" ({help})"));
+    }
+    if let Some(explanation) = diagnostic.explanation() {
+        message.push_str(&format!(" — {explanation}"));
+    }
+    if !diagnostic.suggestions().is_empty() {
+        let suggestions = diagnostic
+            .suggestions()
+            .iter()
+            .map(|suggestion| suggestion.replacement.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        message.push_str(&format!(" Suggestions: {suggestions}"));
+    }
+    message
+}
+
 fn extract_candidates(
     uri: &Url,
     content: &str,
 ) -> std::result::Result<Vec<CandidateInput>, utilitycss_swc::ExtractionError> {
-    let candidates = match file_kind(uri.path()) {
-        FileKind::JavaScript(kind) => extract_swc(content, kind).map(|candidates| {
-            candidates
-                .into_iter()
-                .map(|candidate| (candidate.raw(), candidate.span()))
-                .collect::<Vec<_>>()
-        }),
+    match file_kind(uri.path()) {
+        FileKind::JavaScript(kind) => Ok(extract_swc(content, kind)?
+            .into_iter()
+            .map(|candidate| {
+                CandidateInput::new(candidate.raw(), candidate.span())
+                    .with_extraction_mode(ExtractionMode::Ast)
+            })
+            .collect()),
         FileKind::Framework(framework) => Ok(extract_for_framework(content, framework)
             .into_iter()
-            .map(|candidate| (candidate.raw(), candidate.span()))
-            .collect::<Vec<_>>()),
-    }?;
-    Ok(candidates.into_iter().map(|(raw, span)| CandidateInput::new(raw, span)).collect())
+            .map(|candidate| {
+                CandidateInput::new(candidate.raw(), candidate.span())
+                    .with_extraction_mode(ExtractionMode::Static)
+            })
+            .collect()),
+    }
 }
 
 enum FileKind {

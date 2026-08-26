@@ -17,6 +17,7 @@ fn main() {
     benchmark_scan_and_parse(ITERATIONS);
     benchmark_swc_extraction(ITERATIONS / 10);
     benchmark_compiler(ITERATIONS / 100);
+    benchmark_introspection(ITERATIONS / 100);
     benchmark_stylesheet();
 }
 
@@ -110,6 +111,26 @@ fn benchmark_compiler(iterations: u32) {
         black_box(compiler.build());
     }
     println!("no-op rebuild: {iterations} iterations in {:?}", started.elapsed());
+}
+
+fn benchmark_introspection(iterations: u32) {
+    let compiler = Compiler::new(CompilerConfig::new());
+    let candidates = [
+        "hover:bg-red-500/50!",
+        "w-[calc(100%_-_2rem)]",
+        "[@supports(display:grid)]:grid",
+        "[content-visibility:auto]",
+    ];
+    let started = Instant::now();
+    let mut valid = 0_u64;
+    for index in 0..iterations {
+        let result = compiler.explain(utilitycss_compiler::ExplainRequest::new(black_box(
+            candidates[index as usize % candidates.len()],
+        )));
+        valid = valid
+            .wrapping_add(u64::from(result.status == utilitycss_compiler::ResolutionStatus::Valid));
+    }
+    println!("explain+resolve: {iterations} iterations in {:?} (valid={valid})", started.elapsed());
 }
 
 fn benchmark_stylesheet() {

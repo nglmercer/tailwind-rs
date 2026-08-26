@@ -8,6 +8,45 @@
 
 use utilitycss_span::Span;
 
+/// Source-discovery strategy used to produce candidate tokens.
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+pub enum ExtractionMode {
+    /// Language-agnostic text scanning.
+    #[default]
+    Text,
+    /// Static template and literal extraction.
+    Static,
+    /// Host-language AST extraction.
+    Ast,
+    /// Deterministic union of static and text extraction.
+    Hybrid,
+}
+
+impl ExtractionMode {
+    /// Returns the stable wire-format name for this extraction mode.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Static => "static",
+            Self::Ast => "ast",
+            Self::Hybrid => "hybrid",
+        }
+    }
+
+    /// Parses a stable extraction-mode name supplied by a host adapter.
+    #[must_use]
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "text" => Some(Self::Text),
+            "static" => Some(Self::Static),
+            "ast" => Some(Self::Ast),
+            "hybrid" => Some(Self::Hybrid),
+            _ => None,
+        }
+    }
+}
+
 /// A borrowed candidate token and its byte span in the scanned source.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CandidateToken<'source> {
@@ -127,7 +166,7 @@ fn scan_candidate_end(source: &str, start: usize) -> usize {
 }
 
 fn is_candidate_start(character: char) -> bool {
-    character.is_alphanumeric() || matches!(character, '!' | '-' | '_')
+    character.is_alphanumeric() || matches!(character, '!' | '-' | '_' | '[')
 }
 
 fn is_candidate_continue(character: char) -> bool {
@@ -142,7 +181,14 @@ fn is_candidate_continue(character: char) -> bool {
 mod tests {
     use proptest::prelude::*;
 
-    use super::scan;
+    use super::{scan, ExtractionMode};
+
+    #[test]
+    fn extraction_modes_have_stable_wire_names() {
+        assert_eq!(ExtractionMode::Text.as_str(), "text");
+        assert_eq!(ExtractionMode::parse("hybrid"), Some(ExtractionMode::Hybrid));
+        assert_eq!(ExtractionMode::parse("unknown"), None);
+    }
 
     fn contains(source: &str, expected: &str) -> bool {
         scan(source).iter().any(|token| token.raw() == expected)
@@ -185,6 +231,20 @@ mod tests {
         let tokens = scan("class=\"w-[calc(100% - 2rem) p-4\"");
 
         assert!(tokens.iter().any(|token| token.raw().starts_with("w-[")));
+    }
+
+    #[test]
+    fn reaches_arbitrary_properties_selectors_and_at_rules() {
+        let source =
+            "[mask-type:luminance] [&>*]:p-4 [@supports(display:grid)]:grid hover:bg-red-500/50!";
+        for candidate in [
+            "[mask-type:luminance]",
+            "[&>*]:p-4",
+            "[@supports(display:grid)]:grid",
+            "hover:bg-red-500/50!",
+        ] {
+            assert!(contains(source, candidate), "scanner missed `{candidate}`");
+        }
     }
 
     #[test]

@@ -11,6 +11,7 @@ use utilitycss_compiler::{CandidateInput, Compiler as CoreCompiler, CompilerConf
 use utilitycss_css_ir::CssSerializationMode;
 use utilitycss_diagnostics::Severity;
 use utilitycss_extractor::{extract_for_framework, Framework};
+use utilitycss_scanner::ExtractionMode;
 use utilitycss_span::{SourceId, Span};
 use utilitycss_stylesheet::{transform_stylesheet, StylesheetInput};
 use utilitycss_swc::{extract as extract_swc, SourceKind as SwcSourceKind};
@@ -32,6 +33,10 @@ pub struct JsDiagnostic {
     pub end: Option<u32>,
     /// Optional actionable help text.
     pub help: Option<String>,
+    /// Optional longer explanation for IDE and agent clients.
+    pub explanation: Option<String>,
+    /// Deterministic replacement suggestions.
+    pub suggestions: Vec<String>,
 }
 
 /// A statically extracted candidate accepted by the batched source update API.
@@ -43,6 +48,8 @@ pub struct JsCandidate {
     pub start: u32,
     /// Exclusive end byte offset.
     pub end: u32,
+    /// Extraction mode that produced this candidate.
+    pub extraction_mode: Option<String>,
 }
 
 /// Build counters returned across the N-API boundary.
@@ -126,7 +133,18 @@ impl Compiler {
                     let span = Span::new(candidate.start, candidate.end).ok_or_else(|| {
                         Error::new(Status::InvalidArg, "candidate span is not ordered")
                     })?;
-                    Ok(CandidateInput::new(candidate.raw, span))
+                    let input = CandidateInput::new(candidate.raw, span);
+                    match candidate.extraction_mode.as_deref() {
+                        None => Ok(input),
+                        Some(name) => ExtractionMode::parse(name)
+                            .map(|mode| input.with_extraction_mode(mode))
+                            .ok_or_else(|| {
+                                Error::new(
+                                    Status::InvalidArg,
+                                    format!("unknown extraction mode `{name}`"),
+                                )
+                            }),
+                    }
                 })
                 .collect::<Result<Vec<_>>>()?;
             self.inner
@@ -150,19 +168,20 @@ impl Compiler {
             SourceKind::JavaScript(kind) => extract_swc(&content, kind)
                 .map_err(|error| Error::new(Status::InvalidArg, error.to_string()))?
                 .into_iter()
-                .map(|candidate| (candidate.raw(), candidate.span()))
+                .map(|candidate| (candidate.raw(), candidate.span(), ExtractionMode::Ast))
                 .collect::<Vec<_>>(),
             SourceKind::Framework(framework) => extract_for_framework(&content, framework)
                 .into_iter()
-                .map(|candidate| (candidate.raw(), candidate.span()))
+                .map(|candidate| (candidate.raw(), candidate.span(), ExtractionMode::Static))
                 .collect(),
         };
         Ok(candidates
             .into_iter()
-            .map(|(raw, span)| JsCandidate {
+            .map(|(raw, span, mode)| JsCandidate {
                 raw: raw.to_owned(),
                 start: span.start(),
                 end: span.end(),
+                extraction_mode: Some(mode.as_str().to_owned()),
             })
             .collect())
     }
@@ -193,6 +212,28 @@ impl Compiler {
                 rules_removed: saturating_u32(stats.rules_removed()),
             },
         }
+    }
+
+    /// Explains one candidate and returns the stable JSON introspection payload.
+    #[napi]
+    pub fn explain(&self, candidate: String) -> Result<String> {
+        serde_json::to_string(&self.inner.explain_candidate(&candidate))
+            .map_err(|error| Error::new(Status::GenericFailure, error.to_string()))
+    }
+
+    /// Validates one candidate and returns the stable JSON validation payload.
+    #[napi]
+    pub fn validate(&self, candidate: String) -> Result<String> {
+        serde_json::to_string(
+            &self.inner.validate(utilitycss_compiler::ExplainRequest::new(&candidate)),
+        )
+        .map_err(|error| Error::new(Status::GenericFailure, error.to_string()))
+    }
+
+    /// Returns the active machine-readable capability manifest as JSON.
+    #[napi]
+    pub fn capabilities(&self) -> String {
+        self.inner.capability_manifest_json()
     }
 
     /// Transforms authored CSS and resolves explicit `@apply` directives.
@@ -230,6 +271,12 @@ fn js_diagnostic(diagnostic: &utilitycss_diagnostics::Diagnostic) -> JsDiagnosti
         start: diagnostic.span().map(|span| span.start()),
         end: diagnostic.span().map(|span| span.end()),
         help: diagnostic.help().map(str::to_owned),
+        explanation: diagnostic.explanation().map(str::to_owned),
+        suggestions: diagnostic
+            .suggestions()
+            .iter()
+            .map(|suggestion| suggestion.replacement.clone())
+            .collect(),
     }
 }
 

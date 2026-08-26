@@ -1,6 +1,6 @@
 [package]
-name = "utilitycss-diagnostics"
-description = "Typed, source-aware diagnostics for utilitycss."
+name = "utilitycss-introspect"
+description = "Registry-backed explain, validation, completion, and capability APIs for utilitycss."
 edition.workspace = true
 rust-version.workspace = true
 version.workspace = true
@@ -10,8 +10,7 @@ homepage.workspace = true
 readme.workspace = true
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-utilitycss-span = { version = "0.1.0", path = "../utilitycss-span" }
+utilitycss-compiler = { version = "0.1.0", path = "../utilitycss-compiler" }
 
 [lints]
 workspace = true

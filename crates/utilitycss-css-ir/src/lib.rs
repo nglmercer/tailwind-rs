@@ -5,6 +5,8 @@
 
 use std::cmp::Ordering;
 
+use serde::Serialize;
+
 /// Controls whitespace emitted by [`CssDocument::to_css`].
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 pub enum CssSerializationMode {
@@ -15,12 +17,119 @@ pub enum CssSerializationMode {
     Minified,
 }
 
+/// Browser capability target used by deterministic compatibility analysis.
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub enum BrowserTarget {
+    /// Current modern browsers with the full vNext feature set.
+    #[default]
+    Modern,
+    /// Evergreen browser releases suitable for normal production output.
+    Evergreen,
+    /// A Safari 15-era target with selected newer features unavailable.
+    Safari15,
+    /// A conservative legacy target that accepts only broadly established CSS features.
+    Legacy,
+}
+
+impl BrowserTarget {
+    /// Returns the stable configuration name for this target.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Modern => "modern",
+            Self::Evergreen => "evergreen",
+            Self::Safari15 => "safari-15",
+            Self::Legacy => "legacy",
+        }
+    }
+
+    /// Parses a stable browser-target name.
+    #[must_use]
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "modern" => Some(Self::Modern),
+            "evergreen" => Some(Self::Evergreen),
+            "safari-15" | "safari15" => Some(Self::Safari15),
+            "legacy" => Some(Self::Legacy),
+            _ => None,
+        }
+    }
+
+    /// Returns whether this target is expected to support a CSS feature.
+    #[must_use]
+    pub const fn supports(self, feature: CssFeature) -> bool {
+        match self {
+            Self::Modern | Self::Evergreen => true,
+            Self::Safari15 => !matches!(
+                feature,
+                CssFeature::ColorMix | CssFeature::LightDark | CssFeature::FieldSizing
+            ),
+            Self::Legacy => false,
+        }
+    }
+}
+
+/// CSS features that may require browser-aware lowering or a compatibility warning.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub enum CssFeature {
+    /// The `color-mix()` color interpolation function.
+    ColorMix,
+    /// The `light-dark()` color function.
+    LightDark,
+    /// The `oklch()` color function.
+    Oklch,
+    /// The `content-visibility` property.
+    ContentVisibility,
+    /// The `field-sizing` property.
+    FieldSizing,
+    /// The `backdrop-filter` property or function.
+    BackdropFilter,
+    /// The CSS masking property family.
+    Masking,
+}
+
+impl CssFeature {
+    /// Returns a stable feature name for manifests and diagnostics.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ColorMix => "color-mix",
+            Self::LightDark => "light-dark",
+            Self::Oklch => "oklch",
+            Self::ContentVisibility => "content-visibility",
+            Self::FieldSizing => "field-sizing",
+            Self::BackdropFilter => "backdrop-filter",
+            Self::Masking => "masking",
+        }
+    }
+}
+
+/// Browser compatibility findings for a CSS IR document.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct BrowserSupportReport {
+    /// Target used for the analysis.
+    pub target: BrowserTarget,
+    /// Features required by the document in deterministic order.
+    pub required: Vec<CssFeature>,
+    /// Required features not supported by the target.
+    pub unsupported: Vec<CssFeature>,
+}
+
+impl BrowserSupportReport {
+    /// Returns whether all required features are supported by the target.
+    #[must_use]
+    pub fn is_supported(&self) -> bool {
+        self.unsupported.is_empty()
+    }
+}
+
 /// A stable ordering key assigned before CSS serialization.
-#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct OrderKey {
     layer: u16,
     variant: u16,
     utility: u16,
+    modifier: u16,
     tie_breaker: u64,
 }
 
@@ -28,7 +137,7 @@ impl OrderKey {
     /// Creates an ordering key from explicit semantic ordering components.
     #[must_use]
     pub const fn new(layer: u16, variant: u16, utility: u16, tie_breaker: u64) -> Self {
-        Self { layer, variant, utility, tie_breaker }
+        Self { layer, variant, utility, modifier: 0, tie_breaker }
     }
 
     /// Returns the layer ordering component.
@@ -49,10 +158,94 @@ impl OrderKey {
         self.utility
     }
 
+    /// Returns the modifier ordering component.
+    #[must_use]
+    pub const fn modifier(self) -> u16 {
+        self.modifier
+    }
+
+    /// Returns a copy with an explicit modifier ordering component.
+    #[must_use]
+    pub const fn with_modifier(mut self, modifier: u16) -> Self {
+        self.modifier = modifier;
+        self
+    }
+
     /// Returns the deterministic tie-breaker component.
     #[must_use]
     pub const fn tie_breaker(self) -> u64 {
         self.tie_breaker
+    }
+
+    /// Converts this legacy compact key into the wide vNext ordering model.
+    #[must_use]
+    pub const fn rule_order(self) -> RuleOrderKey {
+        RuleOrderKey {
+            layer: self.layer,
+            variant_order: self.variant as u32,
+            utility_order: self.utility as u32,
+            modifier_order: self.modifier,
+            candidate_tiebreaker: self.tie_breaker,
+        }
+    }
+}
+
+/// Wide semantic ordering key used by vNext introspection and serializers.
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct RuleOrderKey {
+    /// Cascade layer order.
+    pub layer: u16,
+    /// Variant order.
+    pub variant_order: u32,
+    /// Utility order.
+    pub utility_order: u32,
+    /// Modifier order.
+    pub modifier_order: u16,
+    /// Stable candidate tie-breaker.
+    pub candidate_tiebreaker: u64,
+}
+
+impl RuleOrderKey {
+    /// Creates a wide semantic ordering key.
+    #[must_use]
+    pub const fn new(
+        layer: u16,
+        variant_order: u32,
+        utility_order: u32,
+        modifier_order: u16,
+        candidate_tiebreaker: u64,
+    ) -> Self {
+        Self { layer, variant_order, utility_order, modifier_order, candidate_tiebreaker }
+    }
+
+    /// Converts this key to the compact CSS IR key when all ranks fit in `u16`.
+    #[must_use]
+    pub const fn compact(self) -> Option<OrderKey> {
+        if self.variant_order > u16::MAX as u32 || self.utility_order > u16::MAX as u32 {
+            return None;
+        }
+        Some(OrderKey {
+            layer: self.layer,
+            variant: self.variant_order as u16,
+            utility: self.utility_order as u16,
+            modifier: self.modifier_order,
+            tie_breaker: self.candidate_tiebreaker,
+        })
+    }
+}
+
+/// A custom-property dependency used by a CSS declaration.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct CssDependency {
+    /// Referenced custom-property name, including its leading `--`.
+    pub name: String,
+}
+
+impl CssDependency {
+    /// Creates a dependency reference for a custom property.
+    #[must_use]
+    pub fn new(name: impl Into<String>) -> Self {
+        Self { name: name.into() }
     }
 }
 
@@ -62,19 +255,32 @@ pub struct CssDeclaration {
     property: String,
     value: String,
     important: bool,
+    dependencies: Vec<CssDependency>,
 }
 
 impl CssDeclaration {
     /// Creates a declaration from a property and value.
     #[must_use]
     pub fn new(property: impl Into<String>, value: impl Into<String>) -> Self {
-        Self { property: property.into(), value: value.into(), important: false }
+        Self {
+            property: property.into(),
+            value: value.into(),
+            important: false,
+            dependencies: Vec::new(),
+        }
     }
 
     /// Marks or unmarks the declaration as important.
     #[must_use]
     pub fn with_important(mut self, important: bool) -> Self {
         self.important = important;
+        self
+    }
+
+    /// Adds a custom-property dependency to this declaration.
+    #[must_use]
+    pub fn with_dependency(mut self, dependency: impl Into<String>) -> Self {
+        self.dependencies.push(CssDependency::new(dependency));
         self
     }
 
@@ -94,6 +300,18 @@ impl CssDeclaration {
     #[must_use]
     pub const fn is_important(&self) -> bool {
         self.important
+    }
+
+    /// Returns custom-property dependencies in declaration order.
+    #[must_use]
+    pub fn dependencies(&self) -> &[CssDependency] {
+        &self.dependencies
+    }
+
+    /// Returns browser-sensitive features used by this declaration.
+    #[must_use]
+    pub fn required_features(&self) -> Vec<CssFeature> {
+        declaration_features(&self.property, &self.value)
     }
 }
 
@@ -159,6 +377,45 @@ impl CssRule {
         }
     }
 
+    /// Returns nested rules when this is an at-rule.
+    #[must_use]
+    pub fn children(&self) -> Option<&[CssRule]> {
+        match &self.kind {
+            RuleKind::Style { .. } => None,
+            RuleKind::AtRule { children, .. } => Some(children),
+        }
+    }
+
+    /// Returns browser-sensitive features used by this rule and its descendants.
+    #[must_use]
+    pub fn required_features(&self) -> Vec<CssFeature> {
+        let mut features = Vec::new();
+        match &self.kind {
+            RuleKind::Style { declarations, .. } => {
+                for declaration in declarations {
+                    features.extend(declaration.required_features());
+                }
+            }
+            RuleKind::AtRule { children, .. } => {
+                for child in children {
+                    features.extend(child.required_features());
+                }
+            }
+        }
+        features.sort_unstable();
+        features.dedup();
+        features
+    }
+
+    /// Analyzes this rule and its descendants against a browser target.
+    #[must_use]
+    pub fn browser_support(&self, target: BrowserTarget) -> BrowserSupportReport {
+        let required = self.required_features();
+        let unsupported =
+            required.iter().copied().filter(|feature| !target.supports(*feature)).collect();
+        BrowserSupportReport { target, required, unsupported }
+    }
+
     /// Creates a copy of a style rule with a new selector.
     #[must_use]
     pub fn with_selector(&self, selector: impl Into<String>) -> Option<Self> {
@@ -222,11 +479,58 @@ impl CssDocument {
         self.rules.is_empty()
     }
 
+    /// Returns browser-sensitive features used by the document.
+    #[must_use]
+    pub fn required_features(&self) -> Vec<CssFeature> {
+        let mut features =
+            self.rules.iter().flat_map(CssRule::required_features).collect::<Vec<_>>();
+        features.sort_unstable();
+        features.dedup();
+        features
+    }
+
+    /// Analyzes the document against a deterministic browser target.
+    #[must_use]
+    pub fn browser_support(&self, target: BrowserTarget) -> BrowserSupportReport {
+        let required = self.required_features();
+        let unsupported =
+            required.iter().copied().filter(|feature| !target.supports(*feature)).collect();
+        BrowserSupportReport { target, required, unsupported }
+    }
+
     /// Serializes the document using deterministic ordering.
     #[must_use]
     pub fn to_css(&self, mode: CssSerializationMode) -> String {
         render_rules(&self.rules, mode, 0)
     }
+}
+
+fn declaration_features(property: &str, value: &str) -> Vec<CssFeature> {
+    let lower_property = property.to_ascii_lowercase();
+    let lower_value = value.to_ascii_lowercase();
+    let mut features = Vec::new();
+    if lower_value.contains("color-mix(") {
+        features.push(CssFeature::ColorMix);
+    }
+    if lower_value.contains("light-dark(") {
+        features.push(CssFeature::LightDark);
+    }
+    if lower_value.contains("oklch(") {
+        features.push(CssFeature::Oklch);
+    }
+    if lower_property == "content-visibility" {
+        features.push(CssFeature::ContentVisibility);
+    }
+    if lower_property == "field-sizing" {
+        features.push(CssFeature::FieldSizing);
+    }
+    if lower_property == "backdrop-filter" || lower_value.contains("backdrop-filter(") {
+        features.push(CssFeature::BackdropFilter);
+    }
+    if lower_property.starts_with("mask-") || lower_property == "mask" {
+        features.push(CssFeature::Masking);
+    }
+    features
 }
 
 fn map_rule_kind<F>(kind: &RuleKind, mapper: &mut F) -> RuleKind
@@ -369,7 +673,10 @@ fn indentation(width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{CssDeclaration, CssDocument, CssRule, CssSerializationMode, OrderKey};
+    use super::{
+        BrowserTarget, CssDeclaration, CssDocument, CssFeature, CssRule, CssSerializationMode,
+        OrderKey, RuleOrderKey,
+    };
 
     fn rule(order: OrderKey, selector: &str, property: &str, value: &str) -> CssRule {
         CssRule::style(order, selector, vec![CssDeclaration::new(property, value)])
@@ -414,5 +721,35 @@ mod tests {
             document.to_css(CssSerializationMode::Pretty),
             "@media (min-width: 768px) {\n  .p-4 {\n    padding: 1rem !important;\n  }\n}"
         );
+    }
+
+    #[test]
+    fn wide_order_keys_and_dependencies_round_trip() {
+        let key = RuleOrderKey::new(1, 2, 3, 4, 5);
+        assert_eq!(key.compact().expect("ranks fit").rule_order(), key);
+        let declaration =
+            CssDeclaration::new("background", "var(--stops)").with_dependency("--stops");
+        assert_eq!(declaration.dependencies()[0].name, "--stops");
+    }
+
+    #[test]
+    fn browser_support_analysis_is_recursive_and_deterministic() {
+        let style = CssRule::style(
+            OrderKey::default(),
+            ".demo",
+            vec![
+                CssDeclaration::new("color", "color-mix(in srgb, red 50%, transparent)"),
+                CssDeclaration::new("field-sizing", "content"),
+            ],
+        );
+        let media = CssRule::at_rule(OrderKey::new(0, 1, 0, 0), "media", "print", vec![style]);
+        let mut document = CssDocument::new();
+        document.push(media);
+
+        let report = document.browser_support(BrowserTarget::Safari15);
+        assert_eq!(report.required, vec![CssFeature::ColorMix, CssFeature::FieldSizing]);
+        assert_eq!(report.unsupported, report.required);
+        assert!(!report.is_supported());
+        assert_eq!(BrowserTarget::parse("safari-15"), Some(BrowserTarget::Safari15));
     }
 }

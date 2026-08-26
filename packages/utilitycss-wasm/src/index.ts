@@ -8,6 +8,9 @@ export interface WasmCompiler {
   updateSource(id: string, content: string): void;
   removeSource(id: string): boolean;
   build(): string;
+  explain(candidate: string): Readonly<Record<string, unknown>>;
+  validate(candidate: string): Readonly<Record<string, unknown>>;
+  capabilities(): string;
   transformStylesheet(id: string, content: string): StylesheetResult;
 }
 
@@ -26,6 +29,8 @@ export interface Diagnostic {
   readonly start?: number;
   readonly end?: number;
   readonly help?: string;
+  readonly explanation?: string;
+  readonly suggestions?: readonly string[];
 }
 
 /** A generated WASM module containing the compiler constructor. */

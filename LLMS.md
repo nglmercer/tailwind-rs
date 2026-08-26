@@ -8,6 +8,11 @@ Build a fast, deterministic, runtime-agnostic utility CSS compiler in Rust with 
 
 The compiler is not "a Rust port of Tailwind." It is its own compiler platform with a class-name DSL, theme system, variant system, incremental build model, and adapter layer.
 
+The compiler can explain its own language. Prefer `utilitycss-cli explain`, `validate`, and
+`capabilities --output-dir <dir>` when an agent needs to discover names, values, diagnostics,
+provenance, or generated CSS. Generated `capabilities.json`, `capabilities.schema.json`,
+`REFERENCE.md`, `llms.txt`, and `llms-full.txt` are derived from the active semantic registry.
+
 ## Read order
 
 Before modifying architecture, read:
@@ -134,6 +139,10 @@ emit(css_ir) -> String
 ```
 
 Real implementation may batch work, but semantic boundaries should remain visible.
+
+The facade also exposes registry-backed `explain`, `validate`, `completions`, `hover`, and
+capability APIs. Adapter code MUST delegate to these APIs instead of maintaining lists of utility
+names or duplicating compiler semantics.
 
 ## Documentation obligations
 

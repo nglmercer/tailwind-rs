@@ -11,14 +11,257 @@ use std::{
     fmt,
 };
 
+use serde::Serialize;
 use utilitycss_css_ir::{CssDocument, CssSerializationMode, OrderKey};
-use utilitycss_diagnostics::{Diagnostic, DiagnosticBag, DiagnosticCode};
-use utilitycss_scanner::scan;
+use utilitycss_diagnostics::{Diagnostic, DiagnosticBag, DiagnosticCode, Severity};
+use utilitycss_scanner::{scan, ExtractionMode};
 use utilitycss_span::{SourceId, Span};
-use utilitycss_syntax::parse;
+use utilitycss_syntax::{parse, CandidateAstOwned, GRAMMAR_VERSION};
 use utilitycss_theme::Theme;
 use utilitycss_utilities::{resolve, UtilityErrorKind, UtilityRegistry};
 use utilitycss_variants::{apply, validate_selector, VariantRegistry};
+
+pub use utilitycss_css_ir::{BrowserSupportReport, BrowserTarget, CssFeature};
+
+/// Compatibility behavior selected for candidate explanation and validation.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+pub enum CompatibilityProfile {
+    /// Native utilitycss grammar and semantics.
+    #[default]
+    Native,
+    /// Explicit Tailwind-v4-inspired behavior supported by this release.
+    TailwindV4Like,
+    /// Explicit Tailwind-v3-inspired behavior supported by this release.
+    TailwindV3Like,
+    /// A host-defined profile name.
+    Custom(String),
+}
+
+impl CompatibilityProfile {
+    /// Returns the stable profile name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Native => "native",
+            Self::TailwindV4Like => "tailwind-v4-like",
+            Self::TailwindV3Like => "tailwind-v3-like",
+            Self::Custom(name) => name,
+        }
+    }
+}
+
+/// Request for one structured candidate explanation.
+pub struct ExplainRequest<'a> {
+    /// Candidate source text.
+    pub candidate: &'a str,
+    /// Optional configuration override for this request.
+    pub config: Option<&'a CompilerConfig>,
+    /// Compatibility policy used for the explanation.
+    pub compatibility: CompatibilityProfile,
+}
+
+impl<'a> ExplainRequest<'a> {
+    /// Creates a request against the compiler's current configuration.
+    #[must_use]
+    pub fn new(candidate: &'a str) -> Self {
+        Self { candidate, config: None, compatibility: CompatibilityProfile::Native }
+    }
+
+    /// Selects a compatibility profile.
+    #[must_use]
+    pub fn with_compatibility(mut self, compatibility: CompatibilityProfile) -> Self {
+        self.compatibility = compatibility;
+        self
+    }
+
+    /// Uses a request-local compiler configuration.
+    #[must_use]
+    pub fn with_config(mut self, config: &'a CompilerConfig) -> Self {
+        self.config = Some(config);
+        self
+    }
+}
+
+/// Resolution classification returned by explain and validation APIs.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub enum ResolutionStatus {
+    /// Candidate parsed, resolved, and emitted successfully.
+    Valid,
+    /// Candidate syntax is invalid.
+    InvalidSyntax,
+    /// Candidate syntax is valid but no semantic definition resolved it.
+    Unresolved,
+    /// Candidate is accepted by the language but needs a browser capability warning.
+    UnsupportedBrowser,
+    /// Candidate uses deprecated compatibility behavior.
+    Deprecated,
+    /// Candidate exists only in a compatibility profile.
+    CompatibilityOnly,
+}
+
+/// A serializable diagnostic view used by explain/validate and adapters.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ExplainDiagnostic {
+    /// Severity name.
+    pub severity: String,
+    /// Stable diagnostic code.
+    pub code: String,
+    /// Human-readable message.
+    pub message: String,
+    /// Optional source span.
+    pub span: Option<Span>,
+    /// Optional help text.
+    pub help: Option<String>,
+    /// Optional longer explanation.
+    pub explanation: Option<String>,
+    /// Deterministic suggestions.
+    pub suggestions: Vec<ExplainSuggestion>,
+}
+
+/// A ranked correction suggestion for a candidate.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ExplainSuggestion {
+    /// Suggested candidate text.
+    pub candidate: String,
+    /// Lower scores are better.
+    pub score: u32,
+    /// Why this alternative was selected.
+    pub reason: String,
+}
+
+/// Provenance describing which semantic source introduced a behavior.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ProvenanceEntry {
+    /// Source category (`utility`, `variant`, `theme`, or `preset`).
+    pub kind: String,
+    /// Stable source key.
+    pub key: String,
+    /// Optional detail.
+    pub detail: Option<String>,
+}
+
+/// Complete result of explaining one candidate.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ExplainResult {
+    /// Original candidate text.
+    pub candidate: String,
+    /// Grammar version used to parse the candidate.
+    pub grammar_version: u16,
+    /// Owned parsed AST when syntax was valid.
+    pub parsed: Option<CandidateAstOwned>,
+    /// Stable normalized candidate representation.
+    pub normalized: String,
+    /// Resolution classification.
+    pub status: ResolutionStatus,
+    /// CSS emitted for a valid candidate.
+    pub css: Option<String>,
+    /// Structured diagnostics.
+    pub diagnostics: Vec<ExplainDiagnostic>,
+    /// Ranked alternatives.
+    pub alternatives: Vec<ExplainSuggestion>,
+    /// Semantic provenance entries.
+    pub provenance: Vec<ProvenanceEntry>,
+    /// Compatibility profile used for this request.
+    pub compatibility: String,
+    /// Browser target used for compatibility analysis.
+    pub browser_target: String,
+}
+
+/// Result of validating one candidate against a compiled configuration.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ValidationResult {
+    /// Candidate text.
+    pub candidate: String,
+    /// Whether the candidate is valid and emitted.
+    pub valid: bool,
+    /// Resolution classification.
+    pub status: ResolutionStatus,
+    /// Structured diagnostics.
+    pub diagnostics: Vec<ExplainDiagnostic>,
+    /// Ranked corrections.
+    pub alternatives: Vec<ExplainSuggestion>,
+}
+
+/// One protocol-neutral completion item derived from semantic metadata.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct CompletionItem {
+    /// Candidate label to insert.
+    pub label: String,
+    /// Short detail string.
+    pub detail: String,
+    /// Human-readable documentation.
+    pub documentation: String,
+}
+
+/// Protocol-neutral hover information for a candidate.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct HoverInfo {
+    /// Candidate being described.
+    pub candidate: String,
+    /// Semantic description.
+    pub description: String,
+    /// Optional generated CSS.
+    pub css: Option<String>,
+    /// Provenance entries.
+    pub provenance: Vec<ProvenanceEntry>,
+}
+
+/// Machine-readable registry, grammar, theme, and diagnostics capabilities.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct CapabilityManifest {
+    /// Manifest schema version.
+    pub schema_version: u16,
+    /// Native grammar version.
+    pub grammar_version: u16,
+    /// Compact grammar summary for clients that do not load the EBNF document.
+    pub grammar: String,
+    /// Compiler package version.
+    pub compiler_version: String,
+    /// Active declarative preset identifier.
+    pub active_preset: String,
+    /// Built-in utility descriptors.
+    pub utilities: Vec<utilitycss_utilities::UtilityDescriptor>,
+    /// Built-in variant descriptors.
+    pub variants: Vec<utilitycss_variants::VariantDescriptor>,
+    /// Available theme tokens.
+    pub theme: Vec<utilitycss_theme::ThemeToken>,
+    /// Stable diagnostic catalog.
+    pub diagnostics: Vec<DiagnosticDescriptor>,
+    /// Compatibility profiles exposed by this build.
+    pub compatibility_profiles: Vec<String>,
+    /// Extraction modes supported by the compiler facade.
+    pub extraction_modes: Vec<String>,
+    /// Browser target configured for this compiler instance.
+    pub browser_target: String,
+}
+
+/// One stable diagnostic code in the capability manifest.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct DiagnosticDescriptor {
+    /// Stable code.
+    pub code: String,
+    /// Default severity.
+    pub severity: String,
+    /// Short explanation.
+    pub explanation: String,
+}
+
+/// Reproducible generated documentation and machine artifacts.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GeneratedArtifacts {
+    /// Capability manifest JSON.
+    pub capabilities_json: String,
+    /// JSON Schema for capability consumers.
+    pub schema_json: String,
+    /// Generated Markdown reference.
+    pub reference_markdown: String,
+    /// Compact LLM reference.
+    pub llms_txt: String,
+    /// Expanded LLM reference.
+    pub llms_full_txt: String,
+    /// Compatibility report JSON.
+    pub compatibility_report_json: String,
+}
 
 /// Configuration for a compiler instance.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -27,6 +270,8 @@ pub struct CompilerConfig {
     utilities: UtilityRegistry,
     variants: VariantRegistry,
     serialization_mode: CssSerializationMode,
+    preset: String,
+    browser_target: BrowserTarget,
 }
 
 impl CompilerConfig {
@@ -64,6 +309,20 @@ impl CompilerConfig {
         self
     }
 
+    /// Records the declarative preset that contributed the active semantics.
+    #[must_use]
+    pub fn with_preset_name(mut self, preset: impl Into<String>) -> Self {
+        self.preset = preset.into();
+        self
+    }
+
+    /// Selects the browser capability target used for warnings and lowering policy.
+    #[must_use]
+    pub const fn with_browser_target(mut self, target: BrowserTarget) -> Self {
+        self.browser_target = target;
+        self
+    }
+
     /// Returns the configured theme.
     #[must_use]
     pub fn theme(&self) -> &Theme {
@@ -87,6 +346,35 @@ impl CompilerConfig {
     pub const fn serialization_mode(&self) -> CssSerializationMode {
         self.serialization_mode
     }
+
+    /// Returns the active preset identifier.
+    #[must_use]
+    pub fn preset_name(&self) -> &str {
+        &self.preset
+    }
+
+    /// Returns the configured browser capability target.
+    #[must_use]
+    pub const fn browser_target(&self) -> BrowserTarget {
+        self.browser_target
+    }
+
+    /// Returns a deterministic fingerprint for semantic configuration.
+    #[must_use]
+    pub fn fingerprint(&self) -> u64 {
+        let mut hash = self.theme.fingerprint();
+        for (name, definition) in self.utilities.definitions() {
+            hash = stable_hash_with_seed(hash, name.as_bytes());
+            hash = stable_hash_with_seed(hash, format!("{definition:?}").as_bytes());
+        }
+        for (name, definition) in self.variants.definitions() {
+            hash = stable_hash_with_seed(hash, name.as_bytes());
+            hash = stable_hash_with_seed(hash, format!("{definition:?}").as_bytes());
+        }
+        hash = stable_hash_with_seed(hash, format!("{:?}", self.serialization_mode).as_bytes());
+        hash = stable_hash_with_seed(hash, self.preset.as_bytes());
+        stable_hash_with_seed(hash, self.browser_target.as_str().as_bytes())
+    }
 }
 
 impl Default for CompilerConfig {
@@ -96,6 +384,8 @@ impl Default for CompilerConfig {
             utilities: UtilityRegistry::default(),
             variants: VariantRegistry::default(),
             serialization_mode: CssSerializationMode::Minified,
+            preset: "utilitycss".to_owned(),
+            browser_target: BrowserTarget::Modern,
         }
     }
 }
@@ -149,6 +439,18 @@ impl SourceInput {
 pub struct CandidateInput {
     raw: String,
     span: Span,
+    mode: ExtractionMode,
+}
+
+/// Provenance for one candidate in an incremental source index.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CandidateOrigin {
+    /// Stable source identity.
+    pub source_id: SourceId,
+    /// Source-relative candidate span.
+    pub span: Span,
+    /// Extraction mode that produced the candidate.
+    pub extraction_mode: ExtractionMode,
 }
 
 /// One candidate explicitly supplied to an `@apply` composition operation.
@@ -201,7 +503,14 @@ impl CandidateInput {
     /// Creates a candidate from its source text and byte span.
     #[must_use]
     pub fn new(raw: impl Into<String>, span: Span) -> Self {
-        Self { raw: raw.into(), span }
+        Self { raw: raw.into(), span, mode: ExtractionMode::Text }
+    }
+
+    /// Marks this candidate as produced by a particular extraction mode.
+    #[must_use]
+    pub const fn with_extraction_mode(mut self, mode: ExtractionMode) -> Self {
+        self.mode = mode;
+        self
     }
 
     /// Returns the candidate text.
@@ -214,6 +523,12 @@ impl CandidateInput {
     #[must_use]
     pub const fn span(&self) -> Span {
         self.span
+    }
+
+    /// Returns the extraction mode attached to this candidate.
+    #[must_use]
+    pub const fn extraction_mode(&self) -> ExtractionMode {
+        self.mode
     }
 }
 
@@ -341,7 +656,7 @@ impl CompileStats {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct CandidateCacheEntry {
     rule: Option<utilitycss_css_ir::CssRule>,
-    diagnostic: Option<Diagnostic>,
+    diagnostics: Vec<Diagnostic>,
 }
 
 /// A compiler instance with deterministic source identity storage.
@@ -350,6 +665,7 @@ pub struct Compiler {
     config: CompilerConfig,
     sources: BTreeMap<SourceId, SourceInput>,
     source_candidates: BTreeMap<SourceId, BTreeMap<String, Vec<Span>>>,
+    source_origins: BTreeMap<SourceId, Vec<CandidateOrigin>>,
     candidate_sources: BTreeMap<String, BTreeSet<SourceId>>,
     candidate_cache: BTreeMap<String, CandidateCacheEntry>,
     pending_stats: CompileStats,
@@ -363,6 +679,7 @@ impl Compiler {
             config,
             sources: BTreeMap::new(),
             source_candidates: BTreeMap::new(),
+            source_origins: BTreeMap::new(),
             candidate_sources: BTreeMap::new(),
             candidate_cache: BTreeMap::new(),
             pending_stats: CompileStats::default(),
@@ -407,11 +724,17 @@ impl Compiler {
         let source_id = source.id().clone();
 
         let mut new_candidates: BTreeMap<String, Vec<Span>> = BTreeMap::new();
+        let mut origins = Vec::new();
         let mut candidates_found = 0;
         for candidate in candidates {
             validate_candidate(&source, &candidate)?;
             candidates_found += 1;
-            new_candidates.entry(candidate.raw).or_default().push(candidate.span);
+            new_candidates.entry(candidate.raw.clone()).or_default().push(candidate.span);
+            origins.push(CandidateOrigin {
+                source_id: source_id.clone(),
+                span: candidate.span,
+                extraction_mode: candidate.mode,
+            });
         }
         let previous_candidates =
             self.source_candidates.get(&source_id).cloned().unwrap_or_default();
@@ -426,6 +749,7 @@ impl Compiler {
             }
         }
         self.source_candidates.insert(source_id.clone(), new_candidates);
+        self.source_origins.insert(source_id.clone(), origins);
         self.pending_stats.sources_scanned += 1;
         self.pending_stats.bytes_scanned += source.content().len();
         self.pending_stats.candidates_found += candidates_found;
@@ -436,11 +760,13 @@ impl Compiler {
     /// Removes a source and returns whether it was present.
     pub fn remove_source(&mut self, id: &SourceId) -> bool {
         let Some(previous_candidates) = self.source_candidates.remove(id) else {
+            self.source_origins.remove(id);
             return self.sources.remove(id).is_some();
         };
         for raw in previous_candidates.keys() {
             self.remove_candidate_reference(raw, id);
         }
+        self.source_origins.remove(id);
         self.sources.remove(id).is_some()
     }
 
@@ -454,6 +780,7 @@ impl Compiler {
     pub fn reset(&mut self) {
         self.sources.clear();
         self.source_candidates.clear();
+        self.source_origins.clear();
         self.candidate_sources.clear();
         self.candidate_cache.clear();
         self.pending_stats = CompileStats::default();
@@ -463,6 +790,12 @@ impl Compiler {
     #[must_use]
     pub fn source_count(&self) -> usize {
         self.sources.len()
+    }
+
+    /// Returns candidate ownership and extraction origins for a source.
+    #[must_use]
+    pub fn candidate_origins(&self, source_id: &SourceId) -> &[CandidateOrigin] {
+        self.source_origins.get(source_id).map(Vec::as_slice).unwrap_or_default()
     }
 
     /// Builds all known source units into deterministic CSS and diagnostics.
@@ -492,7 +825,7 @@ impl Compiler {
                 stats.rules_generated += 1;
                 document.push(rule);
             }
-            if let Some(diagnostic) = entry.diagnostic {
+            for diagnostic in entry.diagnostics {
                 for source_id in source_ids {
                     if let Some(spans) = self
                         .source_candidates
@@ -516,6 +849,7 @@ impl Compiler {
     ///
     /// Unlike normal source scanning, an unknown utility is an error here because the caller has
     /// explicitly requested that the candidate be composed.
+    #[allow(clippy::result_large_err)]
     pub fn compose_candidate(
         &mut self,
         raw: &str,
@@ -616,6 +950,611 @@ impl Compiler {
         &self.config
     }
 
+    /// Explains one candidate using the current compiler configuration.
+    #[must_use]
+    pub fn explain_candidate(&self, candidate: &str) -> ExplainResult {
+        self.explain(ExplainRequest::new(candidate))
+    }
+
+    /// Parses, resolves, and explains one candidate without mutating compiler indexes.
+    #[must_use]
+    pub fn explain(&self, request: ExplainRequest<'_>) -> ExplainResult {
+        let config = request.config.unwrap_or(&self.config);
+        let candidate_text = request.candidate.to_owned();
+        let parsed = match parse(request.candidate) {
+            Ok(candidate) => candidate,
+            Err(error) => {
+                let diagnostic = error.to_diagnostic(SourceId::new(""), Span::empty(0));
+                return ExplainResult {
+                    candidate: candidate_text,
+                    grammar_version: GRAMMAR_VERSION,
+                    parsed: None,
+                    normalized: request.candidate.to_owned(),
+                    status: ResolutionStatus::InvalidSyntax,
+                    css: None,
+                    diagnostics: vec![diagnostic_to_explain(&diagnostic)],
+                    alternatives: Vec::new(),
+                    provenance: Vec::new(),
+                    compatibility: request.compatibility.name().to_owned(),
+                    browser_target: config.browser_target().as_str().to_owned(),
+                };
+            }
+        };
+        let parsed_owned = parsed.to_owned_ast();
+        let normalized = parsed.normalized();
+        let mut provenance = vec![
+            ProvenanceEntry {
+                kind: "preset".to_owned(),
+                key: config.preset_name().to_owned(),
+                detail: None,
+            },
+            ProvenanceEntry {
+                kind: "utility".to_owned(),
+                key: if parsed.utility().is_arbitrary_property() {
+                    "[arbitrary-property]".to_owned()
+                } else {
+                    parsed.utility().family().to_owned()
+                },
+                detail: None,
+            },
+        ];
+        for variant in parsed.variants() {
+            let key = match variant.kind() {
+                utilitycss_syntax::VariantKind::Named { name, .. } => name.to_owned(),
+                utilitycss_syntax::VariantKind::Arbitrary { .. } => {
+                    "[arbitrary-selector]".to_owned()
+                }
+                utilitycss_syntax::VariantKind::ArbitraryAtRule { name, .. } => {
+                    format!("@{name}")
+                }
+            };
+            provenance.push(ProvenanceEntry { kind: "variant".to_owned(), key, detail: None });
+        }
+
+        let utility = match resolve(&parsed, config.theme(), config.utilities()) {
+            Ok(utility) => utility,
+            Err(error) => {
+                let diagnostic = error.to_diagnostic(SourceId::new(""), Span::empty(0));
+                let mut alternatives = candidate_alternatives(
+                    parsed.utility().family(),
+                    config.utilities().families(),
+                    "same utility family",
+                );
+                if error.kind() == UtilityErrorKind::UnknownThemeValue {
+                    alternatives.extend(theme_alternatives(&parsed, config));
+                    alternatives.sort_by(|left, right| {
+                        left.score
+                            .cmp(&right.score)
+                            .then_with(|| left.candidate.cmp(&right.candidate))
+                    });
+                    alternatives.dedup_by(|left, right| left.candidate == right.candidate);
+                    alternatives.truncate(8);
+                }
+                return ExplainResult {
+                    candidate: candidate_text,
+                    grammar_version: GRAMMAR_VERSION,
+                    parsed: Some(parsed_owned),
+                    normalized,
+                    status: ResolutionStatus::Unresolved,
+                    css: None,
+                    diagnostics: vec![diagnostic_to_explain(&diagnostic)],
+                    alternatives,
+                    provenance,
+                    compatibility: request.compatibility.name().to_owned(),
+                    browser_target: config.browser_target().as_str().to_owned(),
+                };
+            }
+        };
+        if let Some(value) = parsed.utility().value() {
+            provenance.push(value_provenance(&parsed, value, config));
+        }
+        let utility_order = utility.order();
+        let tie_breaker = stable_hash(request.candidate.as_bytes());
+        let rule = utility.into_rule(tie_breaker);
+        let rule = match apply(&parsed, rule, config.theme(), config.variants()) {
+            Ok(rule) => rule,
+            Err(error) => {
+                let diagnostic = error.to_diagnostic(SourceId::new(""), Span::empty(0));
+                let alternatives = candidate_alternatives(
+                    parsed.variants().first().map_or("", |variant| variant.raw()),
+                    config.variants().names(),
+                    "same variant context",
+                );
+                return ExplainResult {
+                    candidate: candidate_text,
+                    grammar_version: GRAMMAR_VERSION,
+                    parsed: Some(parsed_owned),
+                    normalized,
+                    status: ResolutionStatus::Unresolved,
+                    css: None,
+                    diagnostics: vec![diagnostic_to_explain(&diagnostic)],
+                    alternatives,
+                    provenance,
+                    compatibility: request.compatibility.name().to_owned(),
+                    browser_target: config.browser_target().as_str().to_owned(),
+                };
+            }
+        };
+        let variant_order = config.variants().order(&parsed, config.theme());
+        let ordered_rule =
+            rule.with_order(OrderKey::new(0, variant_order, utility_order, tie_breaker));
+        let browser_report = ordered_rule.browser_support(config.browser_target());
+        let diagnostics = browser_diagnostics(&browser_report);
+        let status = if browser_report.is_supported() {
+            ResolutionStatus::Valid
+        } else {
+            ResolutionStatus::UnsupportedBrowser
+        };
+        let mut document = CssDocument::new();
+        document.push(ordered_rule);
+        ExplainResult {
+            candidate: candidate_text,
+            grammar_version: GRAMMAR_VERSION,
+            parsed: Some(parsed_owned),
+            normalized,
+            status,
+            css: Some(document.to_css(config.serialization_mode())),
+            diagnostics: diagnostics.iter().map(diagnostic_to_explain).collect(),
+            alternatives: Vec::new(),
+            provenance,
+            compatibility: request.compatibility.name().to_owned(),
+            browser_target: config.browser_target().as_str().to_owned(),
+        }
+    }
+
+    /// Validates one candidate and returns only the machine-oriented validation view.
+    #[must_use]
+    pub fn validate(&self, request: ExplainRequest<'_>) -> ValidationResult {
+        let candidate = request.candidate.to_owned();
+        let explanation = self.explain(request);
+        ValidationResult {
+            candidate,
+            valid: explanation.status == ResolutionStatus::Valid
+                && explanation.diagnostics.is_empty(),
+            status: explanation.status,
+            diagnostics: explanation.diagnostics,
+            alternatives: explanation.alternatives,
+        }
+    }
+
+    /// Returns deterministic completion items derived from utility and variant descriptors.
+    #[must_use]
+    pub fn completions(&self, prefix: &str) -> Vec<CompletionItem> {
+        let mut items = BTreeMap::new();
+        for descriptor in self.config.utilities().descriptors() {
+            for name in descriptor.names {
+                let label =
+                    if descriptor.value_schema.required { format!("{name}-") } else { name };
+                if label.starts_with(prefix) {
+                    items.insert(
+                        label.clone(),
+                        CompletionItem {
+                            label,
+                            detail: descriptor.description.clone(),
+                            documentation: descriptor.docs_key.clone(),
+                        },
+                    );
+                }
+            }
+        }
+        for descriptor in self.config.variants().descriptors() {
+            for name in descriptor.names {
+                let label = format!("{name}:");
+                if label.starts_with(prefix) {
+                    items.insert(
+                        label.clone(),
+                        CompletionItem {
+                            label,
+                            detail: descriptor.description.clone(),
+                            documentation: descriptor.examples.join(", "),
+                        },
+                    );
+                }
+            }
+        }
+        for name in
+            self.config.theme().namespace("breakpoint").into_iter().flat_map(|tokens| tokens.keys())
+        {
+            let label = format!("{name}:");
+            if label.starts_with(prefix) {
+                items.insert(
+                    label.clone(),
+                    CompletionItem {
+                        label,
+                        detail: "Responsive breakpoint variant".to_owned(),
+                        documentation: "Wraps the rule in a min-width media query".to_owned(),
+                    },
+                );
+            }
+        }
+        for (label, detail) in [
+            ("data-[...]:", "Data attribute variant"),
+            ("aria-[...]:", "ARIA attribute variant"),
+            ("[&...]:", "Arbitrary selector variant"),
+            ("[@supports(...)]:", "Arbitrary at-rule variant"),
+        ] {
+            if label.starts_with(prefix) {
+                items.insert(
+                    label.to_owned(),
+                    CompletionItem {
+                        label: label.to_owned(),
+                        detail: detail.to_owned(),
+                        documentation: "Use a validated selector or at-rule fragment".to_owned(),
+                    },
+                );
+            }
+        }
+        items.into_values().collect()
+    }
+
+    /// Returns hover information for a valid or unresolved candidate.
+    #[must_use]
+    pub fn hover(&self, candidate: &str) -> Option<HoverInfo> {
+        let explanation = self.explain_candidate(candidate);
+        let parsed = explanation.parsed.as_ref()?;
+        let description = self.config.utilities().descriptor(&parsed.utility.family).map_or_else(
+            || "Unknown utility family".to_owned(),
+            |descriptor| descriptor.description,
+        );
+        Some(HoverInfo {
+            candidate: candidate.to_owned(),
+            description,
+            css: explanation.css,
+            provenance: explanation.provenance,
+        })
+    }
+
+    /// Returns the complete machine-readable capability manifest.
+    #[must_use]
+    pub fn capability_manifest(&self) -> CapabilityManifest {
+        let mut variants = self.config.variants().descriptors();
+        for (name, _) in
+            self.config.theme().namespace("breakpoint").into_iter().flat_map(|tokens| tokens.iter())
+        {
+            if !variants.iter().any(|variant| variant.names.iter().any(|known| known == name)) {
+                variants.push(utilitycss_variants::VariantDescriptor {
+                    id: utilitycss_variants::VariantId::new(name.clone()),
+                    names: vec![name.clone()],
+                    description: "Responsive breakpoint variant".to_owned(),
+                    composable: true,
+                    ordering: 240,
+                    allowed_nesting: vec!["named".to_owned()],
+                    compatibility_profile: "native".to_owned(),
+                    examples: vec![format!("{name}:p-4")],
+                    category: utilitycss_variants::VariantCategory::AtRule,
+                });
+            }
+        }
+        for (name, description, category) in [
+            (
+                "data-[...]",
+                "Data attribute variant with an arbitrary attribute expression",
+                utilitycss_variants::VariantCategory::Selector,
+            ),
+            (
+                "aria-[...]",
+                "ARIA attribute variant with an arbitrary attribute expression",
+                utilitycss_variants::VariantCategory::Selector,
+            ),
+            (
+                "[&...]",
+                "Arbitrary selector variant",
+                utilitycss_variants::VariantCategory::Selector,
+            ),
+            (
+                "[@supports(...)]",
+                "Arbitrary at-rule variant",
+                utilitycss_variants::VariantCategory::AtRule,
+            ),
+        ] {
+            if !variants.iter().any(|variant| variant.names.iter().any(|known| known == name)) {
+                variants.push(utilitycss_variants::VariantDescriptor {
+                    id: utilitycss_variants::VariantId::new(name),
+                    names: vec![name.to_owned()],
+                    description: description.to_owned(),
+                    composable: true,
+                    ordering: 500,
+                    allowed_nesting: vec!["named".to_owned()],
+                    compatibility_profile: "native".to_owned(),
+                    examples: vec![format!("{name}:p-4")],
+                    category,
+                });
+            }
+        }
+        variants.sort_by(|left, right| left.id.as_str().cmp(right.id.as_str()));
+        CapabilityManifest {
+            schema_version: 1,
+            grammar_version: GRAMMAR_VERSION,
+            grammar: "candidate = [\"!\"] , { variant , \" : \" } , utility , [\"!\"] ; arbitrary = \"[\" , balanced-css , \"]\" ;".to_owned(),
+            compiler_version: env!("CARGO_PKG_VERSION").to_owned(),
+            active_preset: self.config.preset_name().to_owned(),
+            utilities: self.config.utilities().descriptors(),
+            variants,
+            theme: self.config.theme().tokens(),
+            diagnostics: diagnostic_catalog(),
+            compatibility_profiles: vec![
+                "native".to_owned(),
+                "tailwind-v4-like".to_owned(),
+                "tailwind-v3-like".to_owned(),
+            ],
+            extraction_modes: ["text", "static", "ast", "hybrid"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+            browser_target: self.config.browser_target().as_str().to_owned(),
+        }
+    }
+
+    /// Serializes the capability manifest using stable pretty JSON.
+    #[must_use]
+    pub fn capability_manifest_json(&self) -> String {
+        serde_json::to_string_pretty(&self.capability_manifest())
+            .unwrap_or_else(|_| "{}".to_owned())
+    }
+
+    /// Generates all vNext documentation and machine artifacts.
+    #[must_use]
+    pub fn generated_artifacts(&self) -> GeneratedArtifacts {
+        let manifest = self.capability_manifest_json();
+        let schema = serde_json::json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$id": "https://utilitycss.dev/schema/capabilities-v1.json",
+            "title": "utilitycss capabilities",
+            "description": "Generated capability manifest for the versioned utilitycss language.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "schema_version",
+                "grammar_version",
+                "grammar",
+                "compiler_version",
+                "active_preset",
+                "utilities",
+                "variants",
+                "theme",
+                "diagnostics",
+                "compatibility_profiles",
+                "extraction_modes",
+                "browser_target"
+            ],
+            "properties": {
+                "schema_version": {"type": "integer", "minimum": 1},
+                "grammar_version": {"type": "integer", "minimum": 1},
+                "grammar": {"type": "string", "minLength": 1},
+                "compiler_version": {"type": "string", "minLength": 1},
+                "active_preset": {"type": "string", "minLength": 1},
+                "utilities": {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/utilityDescriptor"}
+                },
+                "variants": {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/variantDescriptor"}
+                },
+                "theme": {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/themeToken"}
+                },
+                "diagnostics": {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/diagnosticDescriptor"}
+                },
+                "compatibility_profiles": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1}
+                },
+                "extraction_modes": {
+                    "type": "array",
+                    "items": {"enum": ["text", "static", "ast", "hybrid"]}
+                },
+                "browser_target": {
+                    "enum": ["modern", "evergreen", "safari-15", "legacy"]
+                }
+            },
+            "$defs": {
+                "valueNamespace": {
+                    "enum": [
+                        "Raw",
+                        "Spacing",
+                        "Color",
+                        "Width",
+                        "Height",
+                        "Radius",
+                        "FontFamily",
+                        "FontSize",
+                        "LineHeight",
+                        "LetterSpacing",
+                        "Shadow",
+                        "Duration",
+                        "Ease",
+                        "ZIndex",
+                        "Number",
+                        "Length",
+                        "Percentage",
+                        "Integer",
+                        "Keyword"
+                    ]
+                },
+                "arbitraryPolicy": {
+                    "enum": ["Unsupported", "Allowed", "Typed"]
+                },
+                "utilityCategory": {
+                    "enum": [
+                        "Layout",
+                        "FlexGrid",
+                        "SpacingSizing",
+                        "Typography",
+                        "BackgroundBorder",
+                        "Effects",
+                        "TransformsTransitions",
+                        "Interactivity",
+                        "TablesSvg",
+                        "ModernCss",
+                        "Custom"
+                    ]
+                },
+                "negativePolicy": {"enum": ["Unsupported", "Allowed"]},
+                "modifierKind": {
+                    "enum": [
+                        "Unsupported",
+                        "Numeric",
+                        "Percentage",
+                        "ThemeBacked",
+                        "Arbitrary",
+                        "UtilitySpecific"
+                    ]
+                },
+                "stability": {
+                    "enum": ["Stable", "Experimental", "Deprecated", "CompatibilityOnly"]
+                },
+                "valueSchema": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["namespace", "required", "arbitrary", "allowed_values", "description"],
+                    "properties": {
+                        "namespace": {"$ref": "#/$defs/valueNamespace"},
+                        "required": {"type": "boolean"},
+                        "arbitrary": {"$ref": "#/$defs/arbitraryPolicy"},
+                        "allowed_values": {"type": "array", "items": {"type": "string"}},
+                        "description": {"type": "string"}
+                    }
+                },
+                "modifierSchema": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                        "supported",
+                        "required",
+                        "namespace",
+                        "kind",
+                        "arbitrary",
+                        "description"
+                    ],
+                    "properties": {
+                        "supported": {"type": "boolean"},
+                        "required": {"type": "boolean"},
+                        "namespace": {"$ref": "#/$defs/valueNamespace"},
+                        "kind": {"$ref": "#/$defs/modifierKind"},
+                        "arbitrary": {"$ref": "#/$defs/arbitraryPolicy"},
+                        "description": {"type": "string"}
+                    }
+                },
+                "utilityExample": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["candidate", "description"],
+                    "properties": {
+                        "candidate": {"type": "string"},
+                        "description": {"type": "string"}
+                    }
+                },
+                "utilityDescriptor": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                        "id",
+                        "names",
+                        "category",
+                        "description",
+                        "value_schema",
+                        "modifier_schema",
+                        "negative_policy",
+                        "arbitrary_policy",
+                        "theme_namespaces",
+                        "emitted_properties",
+                        "dependencies",
+                        "ordering_group",
+                        "examples",
+                        "docs_key",
+                        "stability"
+                    ],
+                    "properties": {
+                        "id": {"type": "string"},
+                        "names": {"type": "array", "items": {"type": "string"}},
+                        "category": {"$ref": "#/$defs/utilityCategory"},
+                        "description": {"type": "string"},
+                        "value_schema": {"$ref": "#/$defs/valueSchema"},
+                        "modifier_schema": {"$ref": "#/$defs/modifierSchema"},
+                        "negative_policy": {"$ref": "#/$defs/negativePolicy"},
+                        "arbitrary_policy": {"$ref": "#/$defs/arbitraryPolicy"},
+                        "theme_namespaces": {"type": "array", "items": {"type": "string"}},
+                        "emitted_properties": {
+                            "type": "array",
+                            "items": {"type": "string"}
+                        },
+                        "dependencies": {"type": "array", "items": {"type": "string"}},
+                        "ordering_group": {"type": "integer", "minimum": 0},
+                        "examples": {
+                            "type": "array",
+                            "items": {"$ref": "#/$defs/utilityExample"}
+                        },
+                        "docs_key": {"type": "string"},
+                        "stability": {"$ref": "#/$defs/stability"}
+                    }
+                },
+                "variantCategory": {"enum": ["Pseudo", "Selector", "AtRule"]},
+                "variantDescriptor": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                        "id",
+                        "names",
+                        "description",
+                        "composable",
+                        "ordering",
+                        "allowed_nesting",
+                        "compatibility_profile",
+                        "examples",
+                        "category"
+                    ],
+                    "properties": {
+                        "id": {"type": "string"},
+                        "names": {"type": "array", "items": {"type": "string"}},
+                        "description": {"type": "string"},
+                        "composable": {"type": "boolean"},
+                        "ordering": {"type": "integer", "minimum": 0},
+                        "allowed_nesting": {"type": "array", "items": {"type": "string"}},
+                        "compatibility_profile": {"type": "string"},
+                        "examples": {"type": "array", "items": {"type": "string"}},
+                        "category": {"$ref": "#/$defs/variantCategory"}
+                    }
+                },
+                "themeToken": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["namespace", "key", "value"],
+                    "properties": {
+                        "namespace": {"type": "string"},
+                        "key": {"type": "string"},
+                        "value": {"type": "string"}
+                    }
+                },
+                "diagnosticDescriptor": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["code", "severity", "explanation"],
+                    "properties": {
+                        "code": {"type": "string"},
+                        "severity": {"enum": ["error", "warning", "note", "help"]},
+                        "explanation": {"type": "string"}
+                    }
+                }
+            }
+        });
+        let reference = reference_markdown(&self.capability_manifest());
+        let compact = llm_reference(&self.capability_manifest(), false);
+        let full = llm_reference(&self.capability_manifest(), true);
+        let compatibility = compatibility_report_json(&self.capability_manifest());
+        GeneratedArtifacts {
+            capabilities_json: manifest,
+            schema_json: serde_json::to_string_pretty(&schema).unwrap_or_else(|_| "{}".to_owned()),
+            reference_markdown: reference,
+            llms_txt: compact,
+            llms_full_txt: full,
+            compatibility_report_json: compatibility,
+        }
+    }
+
     fn remove_candidate_reference(&mut self, raw: &str, source_id: &SourceId) {
         let mut remove_candidate = false;
         if let Some(source_ids) = self.candidate_sources.get_mut(raw) {
@@ -638,19 +1577,19 @@ fn compile_candidate(raw: &str, config: &CompilerConfig) -> CandidateCacheEntry 
         Err(error) => {
             return CandidateCacheEntry {
                 rule: None,
-                diagnostic: Some(error.to_diagnostic(diagnostic_source, diagnostic_span)),
+                diagnostics: vec![error.to_diagnostic(diagnostic_source, diagnostic_span)],
             };
         }
     };
     let utility = match resolve(&candidate, config.theme(), config.utilities()) {
         Ok(utility) => utility,
         Err(error) if error.kind() == UtilityErrorKind::UnknownUtility => {
-            return CandidateCacheEntry { rule: None, diagnostic: None };
+            return CandidateCacheEntry { rule: None, diagnostics: Vec::new() };
         }
         Err(error) => {
             return CandidateCacheEntry {
                 rule: None,
-                diagnostic: Some(error.to_diagnostic(diagnostic_source, diagnostic_span)),
+                diagnostics: vec![error.to_diagnostic(diagnostic_source, diagnostic_span)],
             };
         }
     };
@@ -662,15 +1601,36 @@ fn compile_candidate(raw: &str, config: &CompilerConfig) -> CandidateCacheEntry 
         Err(error) => {
             return CandidateCacheEntry {
                 rule: None,
-                diagnostic: Some(error.to_diagnostic(diagnostic_source, diagnostic_span)),
+                diagnostics: vec![error.to_diagnostic(diagnostic_source, diagnostic_span)],
             };
         }
     };
     let variant_order = config.variants().order(&candidate, config.theme());
-    CandidateCacheEntry {
-        rule: Some(rule.with_order(OrderKey::new(0, variant_order, utility_order, tie_breaker))),
-        diagnostic: None,
-    }
+    let rule = rule.with_order(OrderKey::new(0, variant_order, utility_order, tie_breaker));
+    let browser_report = rule.browser_support(config.browser_target());
+    CandidateCacheEntry { rule: Some(rule), diagnostics: browser_diagnostics(&browser_report) }
+}
+
+fn browser_diagnostics(report: &BrowserSupportReport) -> Vec<Diagnostic> {
+    report
+        .unsupported
+        .iter()
+        .map(|feature| {
+            Diagnostic::new(
+                Severity::Warning,
+                DiagnosticCode::new("browser.unsupported-feature"),
+                format!(
+                    "browser target `{}` does not guarantee support for `{}`",
+                    report.target.as_str(),
+                    feature.as_str()
+                ),
+            )
+            .with_help("select a modern target or provide a compatibility fallback")
+            .with_explanation(
+                "The candidate remains valid, but the configured browser target may ignore part of the generated CSS.",
+            )
+        })
+        .collect()
 }
 
 fn apply_diagnostic(
@@ -680,8 +1640,10 @@ fn apply_diagnostic(
     span: Span,
     help: Option<&str>,
 ) -> Diagnostic {
-    let diagnostic =
-        Diagnostic::error(DiagnosticCode::new(code), message).with_source(source).with_span(span);
+    let diagnostic = Diagnostic::error(DiagnosticCode::new(code), message)
+        .with_source(source)
+        .with_span(span)
+        .with_explanation("The explicit composition request could not be lowered safely.");
     help.map_or(diagnostic.clone(), |help| diagnostic.with_help(help))
 }
 
@@ -711,9 +1673,281 @@ fn stable_hash(bytes: &[u8]) -> u64 {
     hash
 }
 
+fn stable_hash_with_seed(seed: u64, bytes: &[u8]) -> u64 {
+    let mut hash = seed;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+fn diagnostic_to_explain(diagnostic: &Diagnostic) -> ExplainDiagnostic {
+    ExplainDiagnostic {
+        severity: severity_name(diagnostic.severity()).to_owned(),
+        code: diagnostic.code().to_string(),
+        message: diagnostic.message().to_owned(),
+        span: diagnostic.span(),
+        help: diagnostic.help().map(str::to_owned),
+        explanation: diagnostic.explanation().map(str::to_owned),
+        suggestions: diagnostic
+            .suggestions()
+            .iter()
+            .map(|suggestion| ExplainSuggestion {
+                candidate: suggestion.replacement.clone(),
+                score: 0,
+                reason: suggestion.description.clone(),
+            })
+            .collect(),
+    }
+}
+
+fn value_provenance(
+    candidate: &utilitycss_syntax::CandidateAst<'_>,
+    value: utilitycss_syntax::ValueAst<'_>,
+    config: &CompilerConfig,
+) -> ProvenanceEntry {
+    let utility = candidate.utility();
+    let descriptor_name = if utility.raw() != utility.family()
+        && config.utilities().descriptor(utility.raw()).is_some()
+    {
+        utility.raw()
+    } else {
+        utility.family()
+    };
+    let namespace = config
+        .utilities()
+        .descriptor(descriptor_name)
+        .and_then(|descriptor| descriptor.theme_namespaces.into_iter().next());
+    if let (Some(namespace), utilitycss_syntax::ValueAst::Named(key)) = (namespace, value) {
+        if let Some(resolved) = config.theme().token(&namespace, key) {
+            return ProvenanceEntry {
+                kind: "theme".to_owned(),
+                key: format!("{namespace}:{key}"),
+                detail: Some(format!("resolved to {resolved}")),
+            };
+        }
+    }
+    ProvenanceEntry {
+        kind: "value".to_owned(),
+        key: value.content().to_owned(),
+        detail: value.type_hint().map(|hint| format!("typed as {hint}")),
+    }
+}
+
+fn severity_name(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Error => "error",
+        Severity::Warning => "warning",
+        Severity::Note => "note",
+        Severity::Help => "help",
+    }
+}
+
+fn candidate_alternatives(
+    input: &str,
+    candidates: Vec<&str>,
+    reason: &str,
+) -> Vec<ExplainSuggestion> {
+    let mut alternatives = candidates
+        .into_iter()
+        .map(|candidate| ExplainSuggestion {
+            candidate: candidate.to_owned(),
+            score: edit_distance(input, candidate),
+            reason: reason.to_owned(),
+        })
+        .collect::<Vec<_>>();
+    alternatives.sort_by(|left, right| {
+        left.score.cmp(&right.score).then_with(|| left.candidate.cmp(&right.candidate))
+    });
+    alternatives.truncate(8);
+    alternatives
+}
+
+fn theme_alternatives(
+    candidate: &utilitycss_syntax::CandidateAst<'_>,
+    config: &CompilerConfig,
+) -> Vec<ExplainSuggestion> {
+    let utility = candidate.utility();
+    let descriptor_name = if utility.raw() != utility.family()
+        && config.utilities().descriptor(utility.raw()).is_some()
+    {
+        utility.raw()
+    } else {
+        utility.family()
+    };
+    let Some(namespace) = config
+        .utilities()
+        .descriptor(descriptor_name)
+        .and_then(|descriptor| descriptor.theme_namespaces.into_iter().next())
+    else {
+        return Vec::new();
+    };
+    let Some(tokens) = config.theme().namespace(&namespace) else {
+        return Vec::new();
+    };
+    let value = utility.value().map(|value| value.content()).unwrap_or_default();
+    let prefix = utility.family().to_owned();
+    tokens
+        .keys()
+        .map(|key| ExplainSuggestion {
+            candidate: format!("{prefix}-{key}"),
+            score: edit_distance(value, key),
+            reason: format!("known {namespace} theme value"),
+        })
+        .collect()
+}
+
+fn edit_distance(left: &str, right: &str) -> u32 {
+    let right = right.chars().collect::<Vec<_>>();
+    let mut previous = (0..=right.len()).collect::<Vec<_>>();
+    for (row, left_character) in left.chars().enumerate() {
+        let mut current = vec![row + 1; right.len() + 1];
+        for (column, right_character) in right.iter().enumerate() {
+            current[column + 1] = if left_character == *right_character {
+                previous[column]
+            } else {
+                1 + previous[column].min(previous[column + 1]).min(current[column])
+            };
+        }
+        previous = current;
+    }
+    u32::try_from(*previous.last().unwrap_or(&usize::MAX)).unwrap_or(u32::MAX)
+}
+
+fn diagnostic_catalog() -> Vec<DiagnosticDescriptor> {
+    [
+        ("syntax.empty-candidate", "error", "The candidate is empty."),
+        ("syntax.empty-variant", "error", "A variant segment is empty."),
+        ("syntax.empty-utility", "error", "The utility segment is empty."),
+        ("syntax.missing-name", "error", "A utility or variant name is missing."),
+        ("syntax.missing-value", "error", "The utility value is missing."),
+        ("syntax.unterminated-arbitrary-value", "error", "An arbitrary bracket is not closed."),
+        ("syntax.empty-arbitrary-value", "error", "An arbitrary value is empty."),
+        (
+            "syntax.unexpected-trailing-characters",
+            "error",
+            "Characters follow a complete arbitrary value.",
+        ),
+        (
+            "syntax.invalid-arbitrary-property",
+            "error",
+            "An arbitrary property lacks a property/value separator.",
+        ),
+        ("syntax.invalid-utf8", "error", "Candidate bytes are not valid UTF-8."),
+        ("utility.unknown", "error", "No registered utility matches the candidate."),
+        ("utility.missing-value", "error", "The utility requires a value."),
+        ("utility.unknown-theme-value", "error", "The value is absent from the active theme."),
+        (
+            "utility.invalid-arbitrary-value",
+            "error",
+            "The arbitrary CSS value is unsafe or malformed.",
+        ),
+        ("utility.unsupported-negative", "error", "The utility does not support negative values."),
+        ("utility.invalid-value", "error", "The value is not accepted by the utility."),
+        ("utility.unexpected-value", "error", "The utility does not accept a value."),
+        ("utility.invalid-declaration", "error", "The generated declaration is unsafe."),
+        ("utility.unsupported-modifier", "error", "The utility does not support this modifier."),
+        ("utility.invalid-modifier", "error", "The modifier has an invalid value."),
+        ("variant.unknown", "error", "No registered variant matches the candidate."),
+        ("variant.invalid-value", "error", "The variant value is invalid."),
+        ("variant.unsafe-selector", "error", "The selector or at-rule is unsafe."),
+        (
+            "browser.unsupported-feature",
+            "warning",
+            "The configured browser target may not support a generated CSS feature.",
+        ),
+    ]
+    .into_iter()
+    .map(|(code, severity, explanation)| DiagnosticDescriptor {
+        code: code.to_owned(),
+        severity: severity.to_owned(),
+        explanation: explanation.to_owned(),
+    })
+    .collect()
+}
+
+fn reference_markdown(manifest: &CapabilityManifest) -> String {
+    let mut output = String::from("# utilitycss generated reference\n\n");
+    output.push_str(&format!("- Grammar version: `{}`\n", manifest.grammar_version));
+    output.push_str(&format!("- Active preset: `{}`\n", manifest.active_preset));
+    output.push_str(&format!("- Browser target: `{}`\n", manifest.browser_target));
+    output.push_str(&format!("- Compiler version: `{}`\n\n", manifest.compiler_version));
+    output.push_str("## Utilities\n\n");
+    for utility in &manifest.utilities {
+        output.push_str(&format!("- `{}` — {}\n", utility.names.join("`, `"), utility.description));
+    }
+    output.push_str("\n## Variants\n\n");
+    for variant in &manifest.variants {
+        output.push_str(&format!("- `{}` — {}\n", variant.names.join("`, `"), variant.description));
+    }
+    output
+}
+
+fn llm_reference(manifest: &CapabilityManifest, full: bool) -> String {
+    let mut output = String::from("utilitycss candidate language\n");
+    output.push_str(&format!(
+        "grammar=v{}; preset={}; syntax=[important] [variant:] utility[-value][/modifier]\n",
+        manifest.grammar_version, manifest.active_preset
+    ));
+    output.push_str(&format!(
+        "browser-target={}; unsupported features are reported, not silently lowered\n",
+        manifest.browser_target
+    ));
+    output.push_str("native-important=trailing !; arbitrary=[...]; arbitrary-property=[property:value]; arbitrary-at-rule=[@name(prelude)]\n");
+    output.push_str("utilities:\n");
+    for utility in &manifest.utilities {
+        output.push_str(&format!(
+            "- {}: {}; value={}; allowed={:?}; negative={:?}; arbitrary={:?}; modifier={:?}; dependencies={:?}\n",
+            utility.names.join(","),
+            utility.description,
+            utility.value_schema.namespace.as_str(),
+            utility.value_schema.allowed_values,
+            utility.negative_policy,
+            utility.arbitrary_policy,
+            utility.modifier_schema.kind,
+            utility.dependencies,
+        ));
+    }
+    output.push_str("variants:\n");
+    for variant in &manifest.variants {
+        output.push_str(&format!(
+            "- {}: {}; category={:?}\n",
+            variant.names.join(","),
+            variant.description,
+            variant.category
+        ));
+    }
+    if full {
+        output.push_str("diagnostic-codes:\n");
+        for diagnostic in &manifest.diagnostics {
+            output.push_str(&format!("- {}: {}\n", diagnostic.code, diagnostic.explanation));
+        }
+        output.push_str("theme-tokens:\n");
+        for token in &manifest.theme {
+            output.push_str(&format!("- {}:{} = {}\n", token.namespace, token.key, token.value));
+        }
+    }
+    output
+}
+
+fn compatibility_report_json(manifest: &CapabilityManifest) -> String {
+    let report = serde_json::json!({
+        "schema_version": 1,
+        "profiles": manifest.compatibility_profiles,
+        "native_utility_count": manifest.utilities.len(),
+        "native_variant_count": manifest.variants.len(),
+        "active_preset": manifest.active_preset,
+        "browser_target": manifest.browser_target,
+        "claims": [],
+        "status": "scoped-fixtures-required-for-compatibility-claims"
+    });
+    serde_json::to_string_pretty(&report).unwrap_or_else(|_| "{}".to_owned())
+}
+
 #[cfg(test)]
 mod tests {
-    use utilitycss_css_ir::CssSerializationMode;
+    use utilitycss_css_ir::{BrowserTarget, CssSerializationMode};
     use utilitycss_span::SourceId;
 
     use utilitycss_span::Span;
@@ -957,5 +2191,83 @@ mod tests {
             .expect_err("unsafe selector must be rejected");
 
         assert_eq!(error.code().as_str(), "apply.invalid-selector");
+    }
+
+    #[test]
+    fn explain_validate_and_capabilities_are_registry_backed() {
+        let compiler = Compiler::new(CompilerConfig::new());
+        let explained = compiler.explain_candidate("md:hover:bg-red-500/50!");
+
+        assert_eq!(explained.status, super::ResolutionStatus::Valid);
+        assert!(explained.css.as_deref().is_some_and(|css| css.contains("50%")));
+        assert_eq!(explained.grammar_version, utilitycss_syntax::GRAMMAR_VERSION);
+        assert_eq!(explained.normalized, "md:hover:bg-red-500/50!");
+        assert!(explained.provenance.iter().any(|entry| entry.kind == "utility"));
+        assert!(explained.provenance.iter().any(|entry| entry.key == "color:red-500"
+            && entry.detail.as_deref() == Some("resolved to #ef4444")));
+
+        let invalid = compiler.validate(super::ExplainRequest::new("unknown-utility"));
+        assert!(!invalid.valid);
+        assert_eq!(invalid.status, super::ResolutionStatus::Unresolved);
+        assert!(!invalid.alternatives.is_empty());
+
+        let typo = compiler.validate(super::ExplainRequest::new("bg-reed-500"));
+        assert!(typo.alternatives.iter().any(|alternative| {
+            alternative.candidate == "bg-red-500"
+                && alternative.reason.contains("color theme value")
+        }));
+
+        let manifest = compiler.capability_manifest();
+        assert!(manifest
+            .utilities
+            .iter()
+            .any(|utility| utility.names.iter().any(|name| name == "p")));
+        assert!(manifest
+            .variants
+            .iter()
+            .any(|variant| variant.names.iter().any(|name| name == "hover")));
+        assert!(compiler.capability_manifest_json().contains("grammar_version"));
+    }
+
+    #[test]
+    fn generated_capability_schema_describes_manifest_items() {
+        let compiler = Compiler::new(CompilerConfig::new());
+        let artifacts = compiler.generated_artifacts();
+        let schema: serde_json::Value =
+            serde_json::from_str(&artifacts.schema_json).expect("generated schema is valid JSON");
+
+        assert_eq!(schema["$schema"], "https://json-schema.org/draft/2020-12/schema");
+        assert_eq!(schema["$id"], "https://utilitycss.dev/schema/capabilities-v1.json");
+        assert_eq!(schema["properties"]["utilities"]["items"]["$ref"], "#/$defs/utilityDescriptor");
+        assert_eq!(schema["properties"]["variants"]["items"]["$ref"], "#/$defs/variantDescriptor");
+        assert_eq!(
+            schema["$defs"]["modifierSchema"]["properties"]["kind"]["$ref"],
+            "#/$defs/modifierKind"
+        );
+        assert_eq!(schema["$defs"]["valueSchema"]["properties"]["allowed_values"]["type"], "array");
+        assert!(schema["required"]
+            .as_array()
+            .is_some_and(|fields| { fields.iter().any(|field| field == "browser_target") }));
+    }
+
+    #[test]
+    fn completion_and_hover_are_not_hand_maintained_lists() {
+        let compiler = Compiler::new(CompilerConfig::new());
+        assert!(compiler.completions("grid").iter().any(|item| item.label == "grid"));
+        assert!(compiler.completions("hover").iter().any(|item| item.label == "hover:"));
+        let hover = compiler.hover("p-4").expect("valid candidates have hover data");
+        assert!(hover.css.as_deref().is_some_and(|css| css.contains("padding")));
+    }
+
+    #[test]
+    fn browser_target_reports_unsupported_features_without_dropping_css() {
+        let compiler =
+            Compiler::new(CompilerConfig::new().with_browser_target(BrowserTarget::Safari15));
+        let explanation = compiler.explain_candidate("bg-red-500/50");
+
+        assert_eq!(explanation.status, super::ResolutionStatus::UnsupportedBrowser);
+        assert!(explanation.css.as_deref().is_some_and(|css| css.contains("color-mix")));
+        assert_eq!(explanation.diagnostics[0].code, "browser.unsupported-feature");
+        assert_eq!(explanation.browser_target, "safari-15");
     }
 }

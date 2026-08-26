@@ -5,11 +5,64 @@
 
 use std::{collections::BTreeMap, error::Error, fmt};
 
+use serde::Serialize;
 use utilitycss_css_ir::CssRule;
 use utilitycss_diagnostics::{Diagnostic, DiagnosticCode};
 use utilitycss_span::{SourceId, Span};
-use utilitycss_syntax::{CandidateAst, ValueAst, VariantAst, VariantKind};
+use utilitycss_syntax::{decode_arbitrary, CandidateAst, ValueAst, VariantAst, VariantKind};
 use utilitycss_theme::Theme;
+
+/// Stable semantic identifier for a named variant.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct VariantId(String);
+
+impl VariantId {
+    /// Creates an identifier from a canonical variant name.
+    #[must_use]
+    pub fn new(name: impl Into<String>) -> Self {
+        Self(name.into())
+    }
+
+    /// Returns the identifier text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// High-level variant category exposed to tooling.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub enum VariantCategory {
+    /// Pseudo-class or pseudo-element selector transformation.
+    Pseudo,
+    /// Ancestor or arbitrary selector transformation.
+    Selector,
+    /// Media, supports, container, or other at-rule wrapper.
+    AtRule,
+}
+
+/// Machine-readable metadata for a named variant.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct VariantDescriptor {
+    /// Stable semantic identifier.
+    pub id: VariantId,
+    /// Accepted canonical names.
+    pub names: Vec<String>,
+    /// Human-readable description.
+    pub description: String,
+    /// Whether the variant can be composed with other variants.
+    pub composable: bool,
+    /// Stable ordering rank.
+    pub ordering: u32,
+    /// Allowed nesting guidance.
+    pub allowed_nesting: Vec<String>,
+    /// Compatibility profile annotation.
+    pub compatibility_profile: String,
+    /// Deterministic examples.
+    pub examples: Vec<String>,
+    /// Variant category.
+    pub category: VariantCategory,
+}
 
 /// A registered variant behavior.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -37,6 +90,22 @@ pub enum VariantDefinition {
         /// Stable variant ordering rank.
         order: u16,
     },
+    /// Applies a selector pattern, replacing `&` with the current selector.
+    Selector {
+        /// Selector pattern containing `&` or an ancestor selector.
+        pattern: String,
+        /// Stable variant ordering rank.
+        order: u16,
+    },
+    /// Wraps rules in a named at-rule. This is useful for supports and container queries.
+    AtRule {
+        /// At-rule name such as `supports` or `container`.
+        name: String,
+        /// At-rule prelude.
+        prelude: String,
+        /// Stable variant ordering rank.
+        order: u16,
+    },
 }
 
 impl VariantDefinition {
@@ -58,11 +127,25 @@ impl VariantDefinition {
         Self::Ancestor { prefix: prefix.into(), order }
     }
 
+    /// Creates a composable selector-pattern variant.
+    #[must_use]
+    pub fn selector(pattern: impl Into<String>, order: u16) -> Self {
+        Self::Selector { pattern: pattern.into(), order }
+    }
+
+    /// Creates a generic at-rule variant.
+    #[must_use]
+    pub fn at_rule(name: impl Into<String>, prelude: impl Into<String>, order: u16) -> Self {
+        Self::AtRule { name: name.into(), prelude: prelude.into(), order }
+    }
+
     fn order(&self) -> u16 {
         match self {
             Self::Pseudo { order, .. }
             | Self::Media { order, .. }
-            | Self::Ancestor { order, .. } => *order,
+            | Self::Ancestor { order, .. }
+            | Self::Selector { order, .. }
+            | Self::AtRule { order, .. } => *order,
         }
     }
 }
@@ -83,6 +166,43 @@ impl VariantRegistry {
             ("focus", ":focus", 110),
             ("active", ":active", 120),
             ("disabled", ":disabled", 130),
+            ("focus-within", ":focus-within", 111),
+            ("focus-visible", ":focus-visible", 112),
+            ("visited", ":visited", 101),
+            ("target", ":target", 102),
+            ("first", ":first-child", 103),
+            ("last", ":last-child", 104),
+            ("only", ":only-child", 105),
+            ("odd", ":nth-child(odd)", 106),
+            ("even", ":nth-child(even)", 107),
+            ("first-of-type", ":first-of-type", 108),
+            ("last-of-type", ":last-of-type", 109),
+            ("only-of-type", ":only-of-type", 113),
+            ("empty", ":empty", 114),
+            ("root", ":root", 115),
+            ("required", ":required", 131),
+            ("optional", ":optional", 132),
+            ("valid", ":valid", 133),
+            ("invalid", ":invalid", 134),
+            ("in-range", ":in-range", 135),
+            ("out-of-range", ":out-of-range", 136),
+            ("placeholder-shown", ":placeholder-shown", 137),
+            ("autofill", ":autofill", 138),
+            ("read-only", ":read-only", 139),
+            ("read-write", ":read-write", 140),
+            ("default", ":default", 141),
+            ("checked", ":checked", 142),
+            ("indeterminate", ":indeterminate", 143),
+            ("open", ":is([open], :popover-open)", 144),
+            ("before", "::before", 145),
+            ("after", "::after", 146),
+            ("first-letter", "::first-letter", 147),
+            ("first-line", "::first-line", 148),
+            ("marker", "::marker", 149),
+            ("selection", "::selection", 150),
+            ("placeholder", "::placeholder", 151),
+            ("file", "::file-selector-button", 152),
+            ("backdrop", "::backdrop", 153),
         ] {
             registry.register(name, VariantDefinition::pseudo(suffix, order));
         }
@@ -91,7 +211,44 @@ impl VariantRegistry {
             VariantDefinition::media("media", "(prefers-color-scheme: dark)", 300),
         );
         registry.register("group-hover", VariantDefinition::ancestor(".group:hover ", 150));
+        for (name, suffix, order) in [
+            ("group-focus", ".group:focus ", 151),
+            ("group-active", ".group:active ", 152),
+            ("group-focus-within", ".group:focus-within ", 153),
+            ("group-disabled", ".group:disabled ", 154),
+            ("group-checked", ".group:checked ", 155),
+        ] {
+            registry.register(name, VariantDefinition::ancestor(suffix, order));
+        }
         registry.register("peer-checked", VariantDefinition::ancestor(".peer:checked ~ ", 160));
+        for (name, suffix, order) in [
+            ("peer-hover", ".peer:hover ~ ", 161),
+            ("peer-focus", ".peer:focus ~ ", 162),
+            ("peer-active", ".peer:active ~ ", 163),
+            ("peer-disabled", ".peer:disabled ~ ", 164),
+            ("peer-invalid", ".peer:invalid ~ ", 165),
+            ("peer-valid", ".peer:valid ~ ", 166),
+        ] {
+            registry.register(name, VariantDefinition::ancestor(suffix, order));
+        }
+        for (name, at_name, prelude, order) in [
+            ("motion-safe", "media", "(prefers-reduced-motion: no-preference)", 310),
+            ("motion-reduce", "media", "(prefers-reduced-motion: reduce)", 311),
+            ("print", "media", "print", 312),
+            ("portrait", "media", "(orientation: portrait)", 313),
+            ("landscape", "media", "(orientation: landscape)", 314),
+            ("contrast-more", "media", "(prefers-contrast: more)", 315),
+            ("contrast-less", "media", "(prefers-contrast: less)", 316),
+            ("forced-colors", "media", "(forced-colors: active)", 317),
+        ] {
+            registry.register(name, VariantDefinition::media(at_name, prelude, order));
+        }
+        registry.register("rtl", VariantDefinition::selector("[dir=\"rtl\"] &", 320));
+        registry.register("ltr", VariantDefinition::selector("[dir=\"ltr\"] &", 321));
+        registry.register(
+            "supports-grid",
+            VariantDefinition::at_rule("supports", "(display: grid)", 330),
+        );
         registry
     }
 
@@ -100,10 +257,91 @@ impl VariantRegistry {
         self.definitions.insert(name.into(), definition);
     }
 
+    /// Registers a named variant after validating its name and duplicate policy.
+    pub fn register_checked(
+        &mut self,
+        name: impl Into<String>,
+        definition: VariantDefinition,
+    ) -> Result<(), VariantRegistryError> {
+        let name = name.into();
+        if name.is_empty()
+            || !name.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        {
+            return Err(VariantRegistryError::InvalidName(name));
+        }
+        if self.definitions.contains_key(&name) {
+            return Err(VariantRegistryError::DuplicateName(name));
+        }
+        self.definitions.insert(name, definition);
+        Ok(())
+    }
+
     /// Returns a named variant definition.
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&VariantDefinition> {
         self.definitions.get(name)
+    }
+
+    /// Returns all registered variant names in deterministic order.
+    #[must_use]
+    pub fn names(&self) -> Vec<&str> {
+        self.definitions.keys().map(String::as_str).collect()
+    }
+
+    /// Returns every registered definition in deterministic name order.
+    pub fn definitions(&self) -> impl Iterator<Item = (&str, &VariantDefinition)> {
+        self.definitions.iter().map(|(name, definition)| (name.as_str(), definition))
+    }
+
+    /// Returns metadata for one named variant.
+    #[must_use]
+    pub fn descriptor(&self, name: &str) -> Option<VariantDescriptor> {
+        self.get(name).map(|definition| descriptor_for(name, definition))
+    }
+
+    /// Returns all variant metadata in deterministic order.
+    #[must_use]
+    pub fn descriptors(&self) -> Vec<VariantDescriptor> {
+        self.definitions().map(|(name, definition)| descriptor_for(name, definition)).collect()
+    }
+
+    /// Validates registered names and at-rule safety before compilation.
+    pub fn validate(&self) -> Result<(), VariantRegistryError> {
+        for (name, definition) in &self.definitions {
+            if name.is_empty()
+                || !name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+            {
+                return Err(VariantRegistryError::InvalidName(name.clone()));
+            }
+            let invalid = match definition {
+                VariantDefinition::Pseudo { suffix, .. } => {
+                    if !suffix.starts_with(':') {
+                        Some("pseudo variants must start with `:`".to_owned())
+                    } else {
+                        safe_selector(suffix, name).err().map(|error| error.to_string())
+                    }
+                }
+                VariantDefinition::Media { name: at_name, prelude, .. }
+                | VariantDefinition::AtRule { name: at_name, prelude, .. } => {
+                    safe_at_rule_name(at_name).err().map(|error| error.to_string()).or_else(|| {
+                        safe_selector(prelude, name).err().map(|error| error.to_string())
+                    })
+                }
+                VariantDefinition::Ancestor { prefix, .. }
+                | VariantDefinition::Selector { pattern: prefix, .. } => {
+                    safe_selector(prefix, name).err().map(|error| error.to_string())
+                }
+            };
+            if let Some(message) = invalid {
+                return Err(VariantRegistryError::InvalidDefinition {
+                    name: name.clone(),
+                    message,
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Returns the highest registered ordering rank in a candidate's variant chain.
@@ -116,7 +354,7 @@ impl VariantRegistry {
                 VariantKind::Named { name, .. } => self
                     .get(name)
                     .map_or_else(|| breakpoint_order(name, theme), VariantDefinition::order),
-                VariantKind::Arbitrary { .. } => 500,
+                VariantKind::Arbitrary { .. } | VariantKind::ArbitraryAtRule { .. } => 500,
             })
             .max()
             .unwrap_or(0)
@@ -126,6 +364,65 @@ impl VariantRegistry {
 impl Default for VariantRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Validation errors raised by a variant registry.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum VariantRegistryError {
+    /// A name is empty or contains unsupported characters.
+    InvalidName(String),
+    /// A checked registration attempted to reuse a name.
+    DuplicateName(String),
+    /// A definition contains an unsafe selector or at-rule fragment.
+    InvalidDefinition {
+        /// Variant name containing the invalid definition.
+        name: String,
+        /// Validation failure detail.
+        message: String,
+    },
+}
+
+impl fmt::Display for VariantRegistryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidName(name) => write!(formatter, "invalid variant name `{name}`"),
+            Self::DuplicateName(name) => write!(formatter, "duplicate variant name `{name}`"),
+            Self::InvalidDefinition { name, message } => {
+                write!(formatter, "invalid variant definition `{name}`: {message}")
+            }
+        }
+    }
+}
+
+impl Error for VariantRegistryError {}
+
+fn descriptor_for(name: &str, definition: &VariantDefinition) -> VariantDescriptor {
+    let (category, description) = match definition {
+        VariantDefinition::Pseudo { .. } => {
+            (VariantCategory::Pseudo, "Transforms the candidate selector with a pseudo selector")
+        }
+        VariantDefinition::Ancestor { .. } | VariantDefinition::Selector { .. } => {
+            (VariantCategory::Selector, "Prefixes the candidate with an ancestor selector")
+        }
+        VariantDefinition::Media { .. } | VariantDefinition::AtRule { .. } => {
+            (VariantCategory::AtRule, "Wraps the candidate in a CSS at-rule")
+        }
+    };
+    VariantDescriptor {
+        id: VariantId::new(name),
+        names: vec![name.to_owned()],
+        description: description.to_owned(),
+        composable: true,
+        ordering: u32::from(definition.order()),
+        allowed_nesting: vec![
+            "named".to_owned(),
+            "arbitrary-selector".to_owned(),
+            "arbitrary-at-rule".to_owned(),
+        ],
+        compatibility_profile: "native".to_owned(),
+        examples: vec![format!("{name}:p-4")],
+        category,
     }
 }
 
@@ -178,7 +475,12 @@ impl VariantError {
     /// Converts the error into a source-aware diagnostic.
     #[must_use]
     pub fn to_diagnostic(&self, source: SourceId, span: Span) -> Diagnostic {
-        Diagnostic::error(self.kind.code(), self.to_string()).with_source(source).with_span(span)
+        Diagnostic::error(self.kind.code(), self.to_string())
+            .with_source(source)
+            .with_span(span)
+            .with_explanation(
+                "The variant could not be applied because it is unknown, malformed, or unsafe.",
+            )
     }
 }
 
@@ -222,8 +524,19 @@ fn apply_one(
 ) -> Result<CssRule, VariantError> {
     match variant.kind() {
         VariantKind::Arbitrary { selector } => {
-            let selector = safe_selector(selector, "[arbitrary]")?;
+            let selector = decode_arbitrary(selector).map_err(|_| {
+                VariantError::new(VariantErrorKind::UnsafeSelector, "[arbitrary]", Some(selector))
+            })?;
+            let selector = safe_selector(&selector, "[arbitrary]")?;
             Ok(rule.map_selectors(|base| apply_selector(selector, base)))
+        }
+        VariantKind::ArbitraryAtRule { name, prelude } => {
+            let prelude = decode_arbitrary(prelude).map_err(|_| {
+                VariantError::new(VariantErrorKind::UnsafeSelector, name, Some(prelude))
+            })?;
+            let name = safe_at_rule_name(name)?;
+            let prelude = safe_selector(&prelude, name)?;
+            Ok(CssRule::at_rule(rule.order(), name, prelude, vec![rule]))
         }
         VariantKind::Named { name, value } => {
             if let Some(definition) = registry.get(name) {
@@ -233,11 +546,38 @@ fn apply_one(
                 if matches!(name, "data" | "aria") {
                     return apply_attribute(name, value, rule);
                 }
+                if name == "supports" {
+                    let prelude = decode_arbitrary(value.content()).map_err(|_| {
+                        VariantError::new(
+                            VariantErrorKind::InvalidValue,
+                            name,
+                            Some(value.content()),
+                        )
+                    })?;
+                    let prelude = safe_selector(&prelude, name)?;
+                    return Ok(CssRule::at_rule(rule.order(), "supports", prelude, vec![rule]));
+                }
                 return Err(VariantError::new(
                     VariantErrorKind::InvalidValue,
                     name,
                     Some(value.content()),
                 ));
+            }
+            if let Some(attribute) = name.strip_prefix("data-") {
+                let attribute = safe_selector(attribute, name)?;
+                if attribute.is_empty() {
+                    return Err(VariantError::new(VariantErrorKind::InvalidValue, name, None));
+                }
+                return Ok(rule.map_selectors(|selector| format!("{selector}[data-{attribute}]")));
+            }
+            if let Some(attribute) = name.strip_prefix("aria-") {
+                let attribute = safe_selector(attribute, name)?;
+                if attribute.is_empty() {
+                    return Err(VariantError::new(VariantErrorKind::InvalidValue, name, None));
+                }
+                return Ok(
+                    rule.map_selectors(|selector| format!("{selector}[aria-{attribute}=\"true\"]"))
+                );
             }
             if let Some(breakpoint) = theme.breakpoint(name) {
                 return Ok(CssRule::at_rule(
@@ -280,6 +620,15 @@ fn apply_definition(
             let prefix = safe_selector(prefix, name)?;
             Ok(rule.map_selectors(|selector| format!("{prefix}{selector}")))
         }
+        VariantDefinition::Selector { pattern, .. } => {
+            let pattern = safe_selector(pattern, name)?;
+            Ok(rule.map_selectors(|selector| apply_selector(pattern, selector)))
+        }
+        VariantDefinition::AtRule { name, prelude, .. } => {
+            let name = safe_at_rule_name(name)?;
+            let prelude = safe_selector(prelude, name)?;
+            Ok(CssRule::at_rule(rule.order(), name, prelude, vec![rule]))
+        }
     }
 }
 
@@ -288,7 +637,10 @@ fn apply_attribute(
     value: ValueAst<'_>,
     rule: CssRule,
 ) -> Result<CssRule, VariantError> {
-    let content = safe_selector(value.content(), name)?;
+    let content = decode_arbitrary(value.content()).map_err(|_| {
+        VariantError::new(VariantErrorKind::InvalidValue, name, Some(value.content()))
+    })?;
+    let content = safe_selector(&content, name)?;
     if content.is_empty() {
         return Err(VariantError::new(VariantErrorKind::InvalidValue, name, Some(content)));
     }
@@ -310,6 +662,19 @@ fn safe_selector<'a>(selector: &'a str, name: &str) -> Result<&'a str, VariantEr
         return Err(VariantError::new(VariantErrorKind::UnsafeSelector, name, Some(selector)));
     }
     Ok(selector)
+}
+
+fn safe_at_rule_name(name: &str) -> Result<&str, VariantError> {
+    let bytes = name.as_bytes();
+    let start = usize::from(bytes.starts_with(b"-"));
+    if bytes.get(start).is_none_or(|byte| !byte.is_ascii_alphabetic() && *byte != b'_')
+        || !bytes[start..]
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(*byte, b'-' | b'_'))
+    {
+        return Err(VariantError::new(VariantErrorKind::UnsafeSelector, name, Some(name)));
+    }
+    Ok(name)
 }
 
 /// Validates a selector supplied by a caller before variant transformations are applied.
@@ -405,5 +770,42 @@ mod tests {
             .expect_err("unsafe registered selector is rejected");
 
         assert_eq!(error.kind(), VariantErrorKind::UnsafeSelector);
+
+        let mut registry = VariantRegistry::new();
+        registry.register("unsafe-at", super::VariantDefinition::at_rule("1media", "screen", 999));
+        let candidate = parse("unsafe-at:flex").expect("candidate is valid");
+        let error = apply(&candidate, base_rule(), &Theme::default(), &registry)
+            .expect_err("at-rule names must be valid identifiers");
+        assert_eq!(error.kind(), VariantErrorKind::UnsafeSelector);
+    }
+
+    #[test]
+    fn validates_registered_variant_definitions_before_resolution() {
+        let mut registry = VariantRegistry::new();
+        registry.register("unsafe", super::VariantDefinition::pseudo(":hover;body{}", 999));
+
+        let error = registry.validate().expect_err("unsafe definitions fail early");
+        assert!(matches!(
+            error,
+            super::VariantRegistryError::InvalidDefinition { name, .. } if name == "unsafe"
+        ));
+    }
+
+    #[test]
+    fn applies_common_state_pseudo_and_at_rule_variants() {
+        let candidate =
+            parse("supports-[display:grid]:focus-visible:p-4").expect("candidate is valid");
+        let rule = apply(&candidate, base_rule(), &Theme::default(), &VariantRegistry::new())
+            .expect("registered variants are valid");
+        let mut document = utilitycss_css_ir::CssDocument::new();
+        document.push(rule);
+        let css = document.to_css(CssSerializationMode::Minified);
+        assert!(css.contains("@supports display:grid"));
+        assert!(css.contains(":focus-visible"));
+
+        let aria = parse("aria-checked:p-4").expect("aria variant is valid");
+        let aria_rule = apply(&aria, base_rule(), &Theme::default(), &VariantRegistry::new())
+            .expect("aria variant is valid");
+        assert_eq!(aria_rule.selector(), Some(".hover\\:bg-red-500[aria-checked=\"true\"]"));
     }
 }

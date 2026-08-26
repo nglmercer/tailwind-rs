@@ -11,7 +11,7 @@
 use std::{collections::BTreeSet, ops::Range, sync::OnceLock};
 
 use regex::Regex;
-use utilitycss_scanner::scan;
+use utilitycss_scanner::{scan, ExtractionMode};
 use utilitycss_span::Span;
 
 /// Framework syntax that can be statically extracted without evaluating application code.
@@ -33,13 +33,20 @@ pub enum Framework {
 pub struct ExtractedCandidate<'source> {
     raw: &'source str,
     span: Span,
+    mode: ExtractionMode,
 }
 
 impl<'source> ExtractedCandidate<'source> {
     /// Creates an extracted candidate from source text and a validated span.
     #[must_use]
     pub const fn new(raw: &'source str, span: Span) -> Self {
-        Self { raw, span }
+        Self { raw, span, mode: ExtractionMode::Static }
+    }
+
+    /// Creates an extracted candidate with an explicit discovery mode.
+    #[must_use]
+    pub const fn with_mode(raw: &'source str, span: Span, mode: ExtractionMode) -> Self {
+        Self { raw, span, mode }
     }
 
     /// Returns the candidate text exactly as it appeared in the source.
@@ -52,6 +59,56 @@ impl<'source> ExtractedCandidate<'source> {
     #[must_use]
     pub const fn span(self) -> Span {
         self.span
+    }
+
+    /// Returns the extraction mode that produced this candidate.
+    #[must_use]
+    pub const fn mode(self) -> ExtractionMode {
+        self.mode
+    }
+}
+
+/// Extracts candidates using an explicit source-discovery mode.
+#[must_use]
+pub fn extract_with_mode(
+    source: &str,
+    mode: ExtractionMode,
+    framework: Framework,
+) -> Vec<ExtractedCandidate<'_>> {
+    match mode {
+        ExtractionMode::Text => scan(source)
+            .into_iter()
+            .map(|token| ExtractedCandidate::with_mode(token.raw(), token.span(), mode))
+            .collect(),
+        ExtractionMode::Static => extract_for_framework(source, framework)
+            .into_iter()
+            .map(|candidate| ExtractedCandidate::with_mode(candidate.raw(), candidate.span(), mode))
+            .collect(),
+        ExtractionMode::Ast => extract_for_framework(source, framework)
+            .into_iter()
+            .map(|candidate| ExtractedCandidate::with_mode(candidate.raw(), candidate.span(), mode))
+            .collect(),
+        ExtractionMode::Hybrid => {
+            let mut candidates = extract_with_mode(source, ExtractionMode::Static, framework)
+                .into_iter()
+                .map(|candidate| {
+                    ExtractedCandidate::with_mode(candidate.raw(), candidate.span(), mode)
+                })
+                .collect::<Vec<_>>();
+            let mut seen =
+                candidates.iter().map(|candidate| candidate.span()).collect::<BTreeSet<_>>();
+            for candidate in extract_with_mode(source, ExtractionMode::Text, framework) {
+                if seen.insert(candidate.span()) {
+                    candidates.push(ExtractedCandidate::with_mode(
+                        candidate.raw(),
+                        candidate.span(),
+                        mode,
+                    ));
+                }
+            }
+            candidates.sort_by_key(|candidate| (candidate.span().start(), candidate.span().end()));
+            candidates
+        }
     }
 }
 
@@ -447,7 +504,9 @@ fn comment_ranges(bytes: &[u8]) -> Vec<Range<usize>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract, extract_for_framework, Framework};
+    use utilitycss_scanner::ExtractionMode;
+
+    use super::{extract, extract_for_framework, extract_with_mode, Framework};
 
     fn raws(source: &str) -> Vec<&str> {
         extract(source).into_iter().map(|candidate| candidate.raw()).collect()
@@ -552,5 +611,16 @@ mod tests {
                 .collect::<Vec<_>>(),
             Vec::<&str>::new()
         );
+    }
+
+    #[test]
+    fn hybrid_extraction_marks_every_origin_as_hybrid() {
+        let candidates = extract_with_mode(
+            r#"<div class="p-4"> const value = "text-red-500";"#,
+            ExtractionMode::Hybrid,
+            Framework::Html,
+        );
+        assert!(!candidates.is_empty());
+        assert!(candidates.iter().all(|candidate| candidate.mode() == ExtractionMode::Hybrid));
     }
 }

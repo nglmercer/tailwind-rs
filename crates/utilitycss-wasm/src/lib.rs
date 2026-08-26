@@ -25,6 +25,8 @@ struct WasmDiagnostic {
     start: Option<u32>,
     end: Option<u32>,
     help: Option<String>,
+    explanation: Option<String>,
+    suggestions: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -60,6 +62,25 @@ impl WasmCompiler {
         self.inner.build().css().to_owned()
     }
 
+    /// Explains one candidate and returns a JavaScript object with parsed and semantic details.
+    pub fn explain(&self, candidate: String) -> Result<JsValue, JsValue> {
+        serde_wasm_bindgen::to_value(&self.inner.explain_candidate(&candidate))
+            .map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
+    /// Validates one candidate and returns a JavaScript object with diagnostics and alternatives.
+    pub fn validate(&self, candidate: String) -> Result<JsValue, JsValue> {
+        serde_wasm_bindgen::to_value(
+            &self.inner.validate(utilitycss_compiler::ExplainRequest::new(&candidate)),
+        )
+        .map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
+    /// Returns the active capability manifest as a JSON string.
+    pub fn capabilities(&self) -> String {
+        self.inner.capability_manifest_json()
+    }
+
     /// Transforms authored CSS and returns CSS plus structured diagnostics.
     #[wasm_bindgen(js_name = transformStylesheet)]
     pub fn transform_stylesheet(
@@ -80,6 +101,12 @@ impl WasmCompiler {
                 start: diagnostic.span().map(|span| span.start()),
                 end: diagnostic.span().map(|span| span.end()),
                 help: diagnostic.help().map(str::to_owned),
+                explanation: diagnostic.explanation().map(str::to_owned),
+                suggestions: diagnostic
+                    .suggestions()
+                    .iter()
+                    .map(|suggestion| suggestion.replacement.clone())
+                    .collect(),
             })
             .collect();
         serde_wasm_bindgen::to_value(&WasmStylesheetResult {

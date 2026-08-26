@@ -9,9 +9,12 @@
 use std::{error::Error, fmt};
 
 use serde::{Deserialize, Serialize};
-use utilitycss_compiler::{CandidateInput, Compiler, CompilerConfig, SourceInput};
+use utilitycss_compiler::{
+    CandidateInput, CompatibilityProfile, Compiler, CompilerConfig, ExplainRequest, SourceInput,
+};
 use utilitycss_css_ir::CssSerializationMode;
 use utilitycss_diagnostics::Severity;
+use utilitycss_scanner::ExtractionMode;
 use utilitycss_span::{SourceId, Span};
 
 /// Current request/response schema version.
@@ -26,6 +29,9 @@ pub struct ProtocolCandidate {
     pub start: u32,
     /// Exclusive end byte offset.
     pub end: u32,
+    /// Optional extraction mode supplied by an AST/static host.
+    #[serde(rename = "extractionMode", default, skip_serializing_if = "Option::is_none")]
+    pub extraction_mode: Option<String>,
 }
 
 /// A versioned compiler request.
@@ -60,6 +66,24 @@ pub enum ProtocolRequest {
     },
     /// Builds the current source set.
     Build,
+    /// Explains one candidate without mutating the compiler session.
+    Explain {
+        /// Candidate source text.
+        candidate: String,
+        /// Optional compatibility profile name.
+        #[serde(default)]
+        compatibility: Option<String>,
+    },
+    /// Validates one candidate without emitting a stylesheet.
+    Validate {
+        /// Candidate source text.
+        candidate: String,
+        /// Optional compatibility profile name.
+        #[serde(default)]
+        compatibility: Option<String>,
+    },
+    /// Returns the active registry, grammar, theme, and diagnostic manifest.
+    Capabilities,
     /// Removes all sources and cached semantic results.
     Reset,
 }
@@ -81,6 +105,12 @@ pub struct ProtocolDiagnostic {
     pub end: Option<u32>,
     /// Optional actionable help text.
     pub help: Option<String>,
+    /// Optional longer explanation.
+    #[serde(default)]
+    pub explanation: Option<String>,
+    /// Deterministic replacement suggestions.
+    #[serde(default)]
+    pub suggestions: Vec<String>,
 }
 
 /// Build counters transported across process or runtime boundaries.
@@ -137,6 +167,21 @@ pub enum ProtocolResponse {
         /// Build result.
         result: ProtocolBuildResult,
     },
+    /// Candidate explanation completed.
+    Explained {
+        /// Serialized explanation payload.
+        result: serde_json::Value,
+    },
+    /// Candidate validation completed.
+    Validated {
+        /// Serialized validation payload.
+        result: serde_json::Value,
+    },
+    /// Capability manifest returned.
+    Capabilities {
+        /// Serialized capability payload.
+        result: serde_json::Value,
+    },
     /// All sources and caches were cleared.
     Reset,
 }
@@ -159,6 +204,8 @@ pub enum ProtocolError {
         /// Exclusive end byte offset.
         end: u32,
     },
+    /// A host supplied an unknown extraction mode.
+    InvalidExtractionMode(String),
     /// A response could not be serialized.
     Serialization(String),
 }
@@ -174,6 +221,9 @@ impl fmt::Display for ProtocolError {
             Self::Compiler(error) => error.fmt(formatter),
             Self::InvalidCandidateSpan { start, end } => {
                 write!(formatter, "candidate span {start}..{end} is not ordered")
+            }
+            Self::InvalidExtractionMode(mode) => {
+                write!(formatter, "unknown extraction mode `{mode}`")
             }
             Self::Serialization(message) => {
                 write!(formatter, "protocol serialization failed: {message}")
@@ -230,7 +280,19 @@ impl ProtocolSession {
                                     end: candidate.end,
                                 },
                             )?;
-                            Ok(CandidateInput::new(candidate.raw, span))
+                            let mode = match candidate.extraction_mode.as_deref() {
+                                None => None,
+                                Some(name) => {
+                                    Some(ExtractionMode::parse(name).ok_or_else(|| {
+                                        ProtocolError::InvalidExtractionMode(name.to_owned())
+                                    })?)
+                                }
+                            };
+                            let input = CandidateInput::new(candidate.raw, span);
+                            Ok(match mode {
+                                Some(mode) => input.with_extraction_mode(mode),
+                                None => input,
+                            })
                         })
                         .collect::<Result<Vec<_>, _>>()?;
                     compiler
@@ -250,6 +312,28 @@ impl ProtocolSession {
                 let compiler = self.compiler.as_mut().ok_or(ProtocolError::NotInitialized)?;
                 Ok(ProtocolResponse::Build { result: build_result(compiler) })
             }
+            ProtocolRequest::Explain { candidate, compatibility } => {
+                let compiler = self.compiler.as_ref().ok_or(ProtocolError::NotInitialized)?;
+                let request = ExplainRequest::new(&candidate)
+                    .with_compatibility(parse_compatibility(compatibility));
+                let result = serde_json::to_value(compiler.explain(request))
+                    .map_err(|error| ProtocolError::Serialization(error.to_string()))?;
+                Ok(ProtocolResponse::Explained { result })
+            }
+            ProtocolRequest::Validate { candidate, compatibility } => {
+                let compiler = self.compiler.as_ref().ok_or(ProtocolError::NotInitialized)?;
+                let request = ExplainRequest::new(&candidate)
+                    .with_compatibility(parse_compatibility(compatibility));
+                let result = serde_json::to_value(compiler.validate(request))
+                    .map_err(|error| ProtocolError::Serialization(error.to_string()))?;
+                Ok(ProtocolResponse::Validated { result })
+            }
+            ProtocolRequest::Capabilities => {
+                let compiler = self.compiler.as_ref().ok_or(ProtocolError::NotInitialized)?;
+                let result = serde_json::to_value(compiler.capability_manifest())
+                    .map_err(|error| ProtocolError::Serialization(error.to_string()))?;
+                Ok(ProtocolResponse::Capabilities { result })
+            }
             ProtocolRequest::Reset => {
                 let compiler = self.compiler.as_mut().ok_or(ProtocolError::NotInitialized)?;
                 compiler.reset();
@@ -265,6 +349,19 @@ impl ProtocolSession {
         let response = self.handle(request)?;
         serde_json::to_string(&response)
             .map_err(|error| ProtocolError::Serialization(error.to_string()))
+    }
+}
+
+fn parse_compatibility(name: Option<String>) -> CompatibilityProfile {
+    match name.as_deref() {
+        None | Some("native") => CompatibilityProfile::Native,
+        Some("tailwind-v4-like") | Some("tailwind-v4-subset") => {
+            CompatibilityProfile::TailwindV4Like
+        }
+        Some("tailwind-v3-like") | Some("tailwind-v3-subset") => {
+            CompatibilityProfile::TailwindV3Like
+        }
+        Some(name) => CompatibilityProfile::Custom(name.to_owned()),
     }
 }
 
@@ -286,6 +383,12 @@ fn build_result(compiler: &mut Compiler) -> ProtocolBuildResult {
             start: diagnostic.span().map(|span| span.start()),
             end: diagnostic.span().map(|span| span.end()),
             help: diagnostic.help().map(str::to_owned),
+            explanation: diagnostic.explanation().map(str::to_owned),
+            suggestions: diagnostic
+                .suggestions()
+                .iter()
+                .map(|suggestion| suggestion.replacement.clone())
+                .collect(),
         })
         .collect();
     let stats = output.stats();
@@ -311,7 +414,10 @@ fn saturating_u64(value: usize) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{ProtocolRequest, ProtocolResponse, ProtocolSession, PROTOCOL_VERSION};
+    use super::{
+        ProtocolCandidate, ProtocolError, ProtocolRequest, ProtocolResponse, ProtocolSession,
+        PROTOCOL_VERSION,
+    };
 
     #[test]
     fn typed_session_builds_one_source() {
@@ -350,5 +456,71 @@ mod tests {
             .expect("request is valid");
 
         assert_eq!(response, r#"{"type":"initialized","protocolVersion":2}"#);
+    }
+
+    #[test]
+    fn introspection_requests_are_runtime_neutral() {
+        let mut session = ProtocolSession::new();
+        session
+            .handle(ProtocolRequest::Initialize {
+                protocol_version: PROTOCOL_VERSION,
+                pretty: false,
+            })
+            .expect("version is supported");
+
+        let ProtocolResponse::Explained { result } = session
+            .handle(ProtocolRequest::Explain {
+                candidate: "hover:bg-red-500/50!".to_owned(),
+                compatibility: None,
+            })
+            .expect("explanation succeeds")
+        else {
+            panic!("expected explanation response");
+        };
+        assert_eq!(result["status"], "Valid");
+        assert_eq!(result["grammar_version"], 1);
+
+        let ProtocolResponse::Capabilities { result } =
+            session.handle(ProtocolRequest::Capabilities).expect("capabilities succeed")
+        else {
+            panic!("expected capabilities response");
+        };
+        assert!(result["utilities"].as_array().is_some_and(|items| !items.is_empty()));
+    }
+
+    #[test]
+    fn candidate_transport_preserves_optional_extraction_mode() {
+        let candidate = ProtocolCandidate {
+            raw: "p-4".to_owned(),
+            start: 0,
+            end: 3,
+            extraction_mode: Some("ast".to_owned()),
+        };
+        let encoded = serde_json::to_string(&candidate).expect("candidate serializes");
+        assert!(encoded.contains("\"extractionMode\":\"ast\""));
+
+        let decoded: ProtocolCandidate = serde_json::from_str(r#"{"raw":"p-4","start":0,"end":3}"#)
+            .expect("legacy candidate payload remains valid");
+        assert_eq!(decoded.extraction_mode, None);
+
+        let mut session = ProtocolSession::new();
+        session
+            .handle(ProtocolRequest::Initialize {
+                protocol_version: PROTOCOL_VERSION,
+                pretty: false,
+            })
+            .expect("version is supported");
+        let error = session
+            .handle(ProtocolRequest::UpdateSource {
+                id: "src/app.tsx".to_owned(),
+                path: None,
+                content: "p-4".to_owned(),
+                candidates: Some(vec![ProtocolCandidate {
+                    extraction_mode: Some("unknown".to_owned()),
+                    ..candidate
+                }]),
+            })
+            .expect_err("unknown extraction modes are rejected");
+        assert!(matches!(error, ProtocolError::InvalidExtractionMode(mode) if mode == "unknown"));
     }
 }

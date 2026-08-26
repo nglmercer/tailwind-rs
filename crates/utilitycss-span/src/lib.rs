@@ -5,8 +5,10 @@
 
 use std::fmt;
 
+use serde::Serialize;
+
 /// A stable identity for a source unit supplied to the compiler.
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct SourceId(String);
 
 impl SourceId {
@@ -39,7 +41,7 @@ impl fmt::Display for SourceId {
 }
 
 /// A half-open byte range within a source unit: `[start, end)`.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct Span {
     start: u32,
     end: u32,

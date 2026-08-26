@@ -15,6 +15,8 @@ crates/
   utilitycss-utilities/
   utilitycss-variants/
   utilitycss-compiler/
+  utilitycss-introspect/
+  utilitycss-compat/
   utilitycss-config/
   utilitycss-cli/
   utilitycss-napi/
@@ -85,6 +87,16 @@ Built-in variant registry and transformations.
 ### `utilitycss-compiler`
 
 High-level compiler facade, caches, incremental indexes.
+
+### `utilitycss-introspect`
+
+Thin discoverable package boundary for explain, validate, completion, hover, and generated
+capability artifacts. It owns no parser or resolver semantics.
+
+### `utilitycss-compat`
+
+Explicit compatibility profile and conformance-reporting boundary. Compatibility claims remain
+scoped and data-backed.
 
 Depends on lower semantic crates.
 

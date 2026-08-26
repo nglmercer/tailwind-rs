@@ -136,3 +136,26 @@ Suggested:
 ## Feature gate policy
 
 Experimental behavior should be behind explicit feature flags or unstable APIs until its semantics are documented.
+
+## vNext implementation track
+
+The LLM-first vNext track extends Phase 6 with the following release-oriented gates. Each gate is
+implemented from the shared semantic registry; adapters and generated artifacts MUST delegate to
+that registry rather than maintain parallel capability lists.
+
+| Release | Gate | Workspace evidence |
+| --- | --- | --- |
+| `0.7` | Versioned candidate grammar, typed AST, arbitrary-property safety, and scanner reachability | `utilitycss-syntax`, `utilitycss-scanner`, `docs/CLASS_DSL.ebnf` |
+| `0.8` | Declarative utility/variant metadata, typed values, dependencies, and validation | `utilitycss-utilities`, `utilitycss-variants`, `utilitycss-theme` |
+| `0.9` | Core layout, spacing, typography, color, effects, grid/flex, SVG, and composable variants | semantic registries and CSS IR |
+| `0.10` | CSS-first configuration, declarative JSON extensions, presets, and config fingerprints | `utilitycss-config` |
+| `0.11` | Explain/validate/completion/hover, diagnostics, provenance, generated reference, schema, and LLM artifacts | `utilitycss-compiler`, `utilitycss-introspect`, CLI/LSP |
+| `0.12` | Text/static/AST/hybrid extraction and executable compatibility fixtures | `utilitycss-extractor`, `utilitycss-protocol`, `utilitycss-compat` |
+| `0.13` | Composite utilities, custom-property dependencies, arbitrary typed values, and modern CSS families | `utilitycss-utilities`, `utilitycss-css-ir` |
+| `0.14` | Browser-target feature analysis and deterministic adapter transport | `utilitycss-css-ir`, compiler/browser diagnostics, N-API/WASM/protocol |
+| `0.15` | Ecosystem hardening, reproducibility, benchmark coverage, and documentation freeze review | workspace checks and conformance fixtures |
+
+These labels describe implementation gates, not compatibility promises. A Tailwind-like profile is
+valid only for the behavior covered by its named fixtures. Native grammar and semantics remain the
+default, and unsupported browser features produce structured findings instead of being silently
+discarded.

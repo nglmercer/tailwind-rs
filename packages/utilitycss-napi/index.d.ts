@@ -12,6 +12,12 @@ export declare class Compiler {
   removeSource(id: string): boolean
   /** Builds the current sources and returns CSS, diagnostics, and counters. */
   build(): JsBuildResult
+  /** Explains one candidate and returns a stable JSON payload. */
+  explain(candidate: string): string
+  /** Validates one candidate and returns a stable JSON payload. */
+  validate(candidate: string): string
+  /** Returns the active capability manifest as JSON. */
+  capabilities(): string
   /** Transforms authored CSS and resolves explicit `@apply` directives. */
   transformStylesheet(id: string, content: string, path?: string | undefined | null): JsStylesheetResult
 }
@@ -34,6 +40,8 @@ export interface JsCandidate {
   start: number
   /** Exclusive end byte offset. */
   end: number
+  /** Extraction mode that produced this candidate. */
+  extractionMode?: string | null
 }
 
 /** A diagnostic returned across the N-API boundary. */
@@ -52,6 +60,10 @@ export interface JsDiagnostic {
   end?: number
   /** Optional actionable help text. */
   help?: string
+  /** Optional longer explanation for IDE and agent clients. */
+  explanation?: string
+  /** Deterministic replacement suggestions. */
+  suggestions: Array<string>
 }
 
 /** Build counters returned across the N-API boundary. */

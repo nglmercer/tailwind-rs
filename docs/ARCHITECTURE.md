@@ -94,6 +94,9 @@ Owns:
 - resolved configuration.
 
 Configuration should be transformed into an immutable compiled representation before hot-path compilation.
+The semantic registry is the single source of truth for resolver behavior, completion, hover,
+generated documentation, capability manifests, JSON Schema, and repair suggestions. Presets are
+explicit data fragments; compatibility policy MUST NOT leak into core parser branches.
 
 ### Semantic resolver
 
@@ -117,7 +120,11 @@ It should support:
 - declarations,
 - selector transformations,
 - source attribution,
-- deterministic ordering keys.
+- deterministic ordering keys,
+- custom-property dependencies for variable-backed declarations.
+
+The IR is intentionally smaller than a general CSS AST. Browser-sensitive lowering belongs in a
+named lowering pass or compatibility profile and MUST remain deterministic.
 
 Do not adopt a huge generic CSS AST unless real requirements justify it.
 

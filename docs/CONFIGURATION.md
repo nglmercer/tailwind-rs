@@ -39,6 +39,17 @@ Conceptual example:
 
 The parser should lower this into a typed compiled theme.
 
+The implemented CSS-first subset also accepts one-declaration `@utility` blocks and selector or
+at-rule `@variant` statements:
+
+```css
+@utility content-auto { content-visibility: auto; }
+@variant theme-midnight (&:where([data-theme="midnight"] *));
+```
+
+The same parser validates custom-property names, balanced blocks, comments, and UTF-8 without
+executing host code.
+
 ## Structured configuration
 
 A serializable JSON/TOML configuration MAY also exist.
@@ -48,6 +59,7 @@ Example:
 ```json
 {
   "preset": "utilitycss",
+  "browserTarget": "modern",
   "theme": {
     "spacing": { "4": "1rem" }
   },
@@ -71,9 +83,15 @@ Example:
 ```
 
 The accepted preset names are `utilitycss` and the explicitly limited
-`tailwind-v4-subset`. The latter is a compatibility profile for the semantics implemented by this
-workspace; it MUST NOT be treated as full Tailwind compatibility. Utility and variant plugin
-entries are declarative, deterministic, and validated before compilation.
+`tailwind-v4-subset` and `tailwind-v3-subset`. The latter profiles are compatibility profiles for
+the semantics implemented by this workspace; they MUST NOT be treated as full Tailwind
+compatibility. Utility and variant plugin entries are declarative, deterministic, and validated
+before compilation. The active preset is included in compiler provenance and capability manifests.
+
+`browserTarget` accepts `modern`, `evergreen`, `safari-15`, or `legacy`. The compiler keeps the
+generated CSS deterministic and reports unsupported modern features as structured warnings. The
+target participates in configuration fingerprints so changing browser policy invalidates cached
+semantic results.
 
 ## JavaScript configuration
 

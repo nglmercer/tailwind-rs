@@ -83,6 +83,8 @@ The initial workspace is intentionally small and runtime-independent:
 - [`utilitycss-css-ir`](./crates/utilitycss-css-ir/) — ordered CSS rules and pretty/minified serialization.
 - [`utilitycss-stylesheet`](./crates/utilitycss-stylesheet/) — token-aware authored CSS transformation and `@apply` composition.
 - [`utilitycss-compiler`](./crates/utilitycss-compiler/) — source indexes, semantic cache, and compiler facade.
+- [`utilitycss-introspect`](./crates/utilitycss-introspect/) — discoverable explain/validate/capability API boundary.
+- [`utilitycss-compat`](./crates/utilitycss-compat/) — explicit compatibility profiles and reports.
 - [`utilitycss-config`](./crates/utilitycss-config/) — declarative JSON configuration loader.
 - [`utilitycss-cli`](./crates/utilitycss-cli/) — native build/watch adapter.
 - [`utilitycss-napi`](./crates/utilitycss-napi/) and [`utilitycss-wasm`](./crates/utilitycss-wasm/) — thin native/WASM bindings.
@@ -94,7 +96,12 @@ The initial workspace is intentionally small and runtime-independent:
 - [`@utilitycss/vite`](./packages/utilitycss-vite/) — Vite lifecycle adapter.
 - [`@utilitycss/wasm`](./packages/utilitycss-wasm/) — TypeScript wrapper for generated WASM bindings.
 
-The facade currently compiles the documented initial utility and variant subset. It remains intentionally conservative: scanner false positives are ignored, unknown syntax is reported as structured diagnostics when appropriate, and arbitrary CSS fragments are validated before lowering. See [`docs/PRODUCTION_CONTRACT.md`](./docs/PRODUCTION_CONTRACT.md) for the support and release contract.
+The facade currently compiles the documented vNext utility and variant subset and exposes the same
+registry through explain, validate, completion, hover, capability, and compatibility APIs. It
+remains intentionally conservative: scanner false positives are ignored, unknown syntax is
+reported as structured diagnostics when appropriate, and arbitrary CSS fragments are validated
+before lowering. See [`docs/PRODUCTION_CONTRACT.md`](./docs/PRODUCTION_CONTRACT.md) for the
+support and release contract.
 
 ## Compatibility
 
@@ -133,8 +140,11 @@ Start with [`LLMS.md`](./LLMS.md) for agent guidance, [`docs/VISION.md`](./docs/
 - [`docs/SPECS.md`](./docs/SPECS.md) — functional and non-functional requirements.
 - [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — layers and responsibilities.
 - [`docs/CLASS_DSL_SPEC.md`](./docs/CLASS_DSL_SPEC.md) — candidate grammar and parsing rules.
+- [`docs/CLASS_DSL.ebnf`](./docs/CLASS_DSL.ebnf) — normative versioned grammar productions.
 - [`docs/COMPILER_PIPELINE.md`](./docs/COMPILER_PIPELINE.md) — scan-to-CSS pipeline.
 - [`docs/CONFIGURATION.md`](./docs/CONFIGURATION.md) — configuration, merging, and validation.
+- [`docs/CAPABILITIES.md`](./docs/CAPABILITIES.md) — generated manifests and LLM/IDE metadata.
+- [`docs/MIGRATION_VNEXT.md`](./docs/MIGRATION_VNEXT.md) — vNext grammar and API migration notes.
 - [`docs/CRATE_LAYOUT.md`](./docs/CRATE_LAYOUT.md) — proposed Rust workspace boundaries.
 - [`docs/API_DESIGN.md`](./docs/API_DESIGN.md) — core API and serialized type guidance.
 

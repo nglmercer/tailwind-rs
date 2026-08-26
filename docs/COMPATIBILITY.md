@@ -46,8 +46,7 @@ Host APIs can differ, compiler meaning cannot.
 
 ## Browser support
 
-Generated CSS browser support is part of the serializer/config policy.
-
-A future target-browser configuration may influence lowering/transforms.
-
-That behavior must be included in config fingerprints.
+Generated CSS browser support is part of the serializer/config policy. The supported deterministic
+targets are `modern`, `evergreen`, `safari-15`, and `legacy`. The compiler analyzes the CSS IR and
+reports unsupported feature use without silently changing semantics; a future lowering pass MAY
+add explicit fallbacks. Browser policy is included in config fingerprints and capability manifests.

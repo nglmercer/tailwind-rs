@@ -21,6 +21,8 @@ const CSS_FILTER = /\.css$/i;
 export interface UtilityCssBunOptions extends CompilerOptions {
   /** The module specifier used by `<link rel="stylesheet" href="...">`. */
   readonly specifier?: string;
+  /** Print build lifecycle and HMR recovery details to the Bun console. */
+  readonly debug?: boolean;
 }
 
 /**
@@ -35,10 +37,13 @@ export function utilitycss(options: UtilityCssBunOptions = {}): BunPlugin {
   const specifier = options.specifier ?? DEFAULT_SPECIFIER;
   const specifierFilter = new RegExp(`^${escapeRegExp(specifier)}$`);
   let compiler: Compiler | undefined;
+  let buildNumber = 0;
+  let lastSuccessfulBuild = 0;
   const moduleSources = new Map<string, string>();
   const moduleDependencies = new Map<string, Set<string>>();
 
   const createBuildCompiler = (): void => {
+    buildNumber += 1;
     compiler?.dispose();
     compiler = createCompiler({
       pretty: options.pretty,
@@ -48,6 +53,11 @@ export function utilitycss(options: UtilityCssBunOptions = {}): BunPlugin {
     });
     for (const [id, source] of moduleSources) {
       requireCompiler().updateSource(id, source, id);
+    }
+    if (options.debug) {
+      const moduleCount = moduleSources.size;
+      const moduleLabel = moduleCount === 1 ? "source module" : "source modules";
+      console.info(`[utilitycss] build #${buildNumber} started (${moduleCount} retained ${moduleLabel})`);
     }
   };
 
@@ -113,19 +123,36 @@ export function utilitycss(options: UtilityCssBunOptions = {}): BunPlugin {
         const sourceId = normalizeModuleId(path);
         const source = await Bun.file(path).text();
         const result: StylesheetResult = requireCompiler().transformStylesheet(sourceId, source, path);
-        reportDiagnostics(result);
+        reportDiagnostics(result, (diagnosticSource) => {
+          return diagnosticSource && normalizeModuleId(diagnosticSource) === sourceId ? source : undefined;
+        });
         return { contents: result.css, loader: "css" };
       });
 
-      build.onEnd(() => {
+      build.onEnd((result) => {
         pruneSourceGraph(build.config.entrypoints);
+        if (!options.debug) {
+          return;
+        }
+        if (result.success) {
+          lastSuccessfulBuild = buildNumber;
+          console.info(`[utilitycss] build #${buildNumber} succeeded`);
+          return;
+        }
+        const lastBuild = lastSuccessfulBuild === 0 ? "none" : `#${lastSuccessfulBuild}`;
+        console.error(
+          `[utilitycss] build #${buildNumber} failed; Bun HMR keeps the last successful bundle (${lastBuild}) active. ` +
+          "Fix the diagnostic below and save again."
+        );
       });
 
       build.onLoad({ filter: /^generated\.css$/, namespace: VIRTUAL_NAMESPACE }, async ({ defer }) => {
         await defer();
         pruneSourceGraph(build.config.entrypoints);
         const result = requireCompiler().build();
-        reportDiagnostics(result);
+        reportDiagnostics(result, (diagnosticSource) => {
+          return diagnosticSource ? moduleSources.get(normalizeModuleId(diagnosticSource)) : undefined;
+        });
         return { contents: result.css, loader: "css" };
       });
     }
@@ -137,12 +164,15 @@ const defaultPlugin = utilitycss();
 
 export default defaultPlugin;
 
-function reportDiagnostics(result: Pick<BuildResult | StylesheetResult, "diagnostics">): void {
+function reportDiagnostics(
+  result: Pick<BuildResult | StylesheetResult, "diagnostics">,
+  sourceLookup?: (source: string | undefined) => string | undefined
+): void {
   const errors: string[] = [];
   const nonErrors: string[] = [];
 
   for (const diagnostic of result.diagnostics) {
-    const formatted = formatDiagnostic(diagnostic);
+    const formatted = formatDiagnostic(diagnostic, sourceLookup?.(diagnostic.source));
     if (diagnostic.severity === "error" || diagnostic.severity === undefined) {
       errors.push(formatted);
     } else {
@@ -155,17 +185,91 @@ function reportDiagnostics(result: Pick<BuildResult | StylesheetResult, "diagnos
   }
 
   if (errors.length > 0) {
-    throw new Error(`utilitycss compilation failed:\n${errors.join("\n")}`);
+    const count = errors.length === 1 ? "1 error" : `${errors.length} errors`;
+    throw new Error([
+      `utilitycss compilation failed (${count})`,
+      ...errors.map((error, index) => `${index + 1}. ${error}`),
+      "",
+      "Bun HMR keeps the last successful bundle active while this rebuild is invalid.",
+      "Fix the diagnostic and save again; a successful rebuild will replace it."
+    ].join("\n"));
   }
 }
 
-function formatDiagnostic(diagnostic: Diagnostic): string {
+function formatDiagnostic(diagnostic: Diagnostic, sourceText?: string): string {
   const source = diagnostic.source ?? "<utilitycss>";
   const span = diagnostic.start === undefined
     ? ""
     : `:${diagnostic.start}-${diagnostic.end ?? diagnostic.start}`;
+  const location = sourceText !== undefined && diagnostic.start !== undefined
+    ? formatSourceLocation(sourceText, diagnostic.start, diagnostic.end)
+    : "";
   const help = diagnostic.help ? `\n  help: ${diagnostic.help}` : "";
-  return `${source}${span}: ${diagnostic.message} [${diagnostic.code}]${help}`;
+  const explanation = diagnostic.explanation ? `\n  explanation: ${diagnostic.explanation}` : "";
+  const suggestions = diagnostic.suggestions && diagnostic.suggestions.length > 0
+    ? `\n  suggestions: ${diagnostic.suggestions.join(", ")}`
+    : "";
+  return `${source}${span}${location}: ${diagnostic.message} [${diagnostic.code}]${help}${explanation}${suggestions}`;
+}
+
+function formatSourceLocation(source: string, start: number, end?: number): string {
+  const startIndex = utf8OffsetToStringIndex(source, start);
+  const endIndex = utf8OffsetToStringIndex(source, end ?? start + 1);
+  const lineStart = source.lastIndexOf("\n", Math.max(0, startIndex - 1)) + 1;
+  const lineEnd = source.indexOf("\n", startIndex) === -1
+    ? source.length
+    : source.indexOf("\n", startIndex);
+  const lineNumber = 1 + countNewlines(source, lineStart);
+  const line = source.slice(lineStart, lineEnd);
+  const maximumExcerptLength = 140;
+  const excerptStart = line.length > maximumExcerptLength
+    ? Math.max(0, Math.min(startIndex - lineStart - 60, line.length - maximumExcerptLength))
+    : 0;
+  const excerptEnd = Math.min(line.length, excerptStart + maximumExcerptLength);
+  const prefix = excerptStart > 0 ? "…" : "";
+  const suffix = excerptEnd < line.length ? "…" : "";
+  const excerpt = `${prefix}${line.slice(excerptStart, excerptEnd)}${suffix}`;
+  const caretStart = prefix.length + visibleLength(line.slice(excerptStart, startIndex));
+  const highlightEnd = Math.max(startIndex + 1, Math.min(endIndex, lineEnd));
+  const caretLength = Math.max(1, visibleLength(line.slice(startIndex, highlightEnd)));
+  const gutter = String(lineNumber).length;
+  return ` (line ${lineNumber}, column ${visibleLength(line.slice(lineStart, startIndex)) + 1})` +
+    `\n${" ".repeat(gutter + 3)}| ${lineNumber} | ${excerpt}` +
+    `\n${" ".repeat(gutter + 3)}| ${" ".repeat(caretStart)}${"^".repeat(caretLength)}`;
+}
+
+function utf8OffsetToStringIndex(source: string, offset: number): number {
+  const target = Math.max(0, Math.trunc(offset));
+  let bytes = 0;
+  let index = 0;
+  while (index < source.length) {
+    const codePoint = source.codePointAt(index);
+    if (codePoint === undefined) {
+      break;
+    }
+    const character = String.fromCodePoint(codePoint);
+    const characterBytes = Buffer.byteLength(character, "utf8");
+    if (bytes + characterBytes > target) {
+      break;
+    }
+    bytes += characterBytes;
+    index += character.length;
+  }
+  return index;
+}
+
+function countNewlines(source: string, end: number): number {
+  let count = 0;
+  for (let index = 0; index < end; index += 1) {
+    if (source[index] === "\n") {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function visibleLength(value: string): number {
+  return [...value].length;
 }
 
 function normalizeModuleId(id: string): string {

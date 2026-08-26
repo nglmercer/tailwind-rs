@@ -37,6 +37,10 @@ assert(missing.length === 0, `utilitycss output is missing: ${missing.join(", ")
 assert(css.includes("background-color:#4f46e5"), "CSS-first brand token was not resolved");
 assert(css.includes("border-radius"), "common radius utilities were not emitted");
 assert(css.includes("box-shadow"), "common shadow utilities were not emitted");
+assert(
+  css.includes("--spacing:.25rem") || css.includes("--spacing:0.25rem"),
+  "demo CSS does not define the spacing scale used by numeric utilities"
+);
 
 const outputKinds = result.outputs.map(output => output.path.split(".").pop()).filter(Boolean);
 assert(outputKinds.includes("html"), "Bun production build did not emit the HTML entry asset");

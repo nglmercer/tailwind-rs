@@ -56,7 +56,9 @@ plugins = ["./src/bun-plugin.ts"]
   and modal dialog.
 - `src/app.css` contains reusable button, badge, card, form, and code-block recipes using
   utilitycss `@apply`.
-- `src/style.css` contains only the demo's presentation details and responsive layout rules.
+- `src/style.css` contains only the demo's presentation details and responsive layout rules. It
+  also defines `--spacing: 0.25rem`, the base used by numeric spacing utilities such as `h-5` and
+  `gap-10`.
 - `utilitycss.config.css` is shared by Bun HMR and `Bun.build()` so theme resolution is consistent.
 - `src/production-build.ts` proves that the same plugin works in a production bundle.
 - `src/verify.ts` checks representative component recipes and generated utility rules.
@@ -65,6 +67,10 @@ This example imports the built repository packages directly, so it is intended t
 checkout of this repository. `@utilitycss/bun` collects the HTML and TSX module graph and returns
 generated CSS through the virtual `utilitycss` stylesheet; it does not require a separate watcher
 or Node.js runtime in the compiled application.
+
+Development builds enable Bun adapter debugging. The terminal reports each build number and, when
+an HMR rebuild fails, explains that Bun keeps the last successful bundle active until the source is
+fixed and saved again. This is expected recovery behavior, not a silently ignored failure.
 
 The production `dist/` output and local `node_modules/` are ignored by this example's `.gitignore`.
 

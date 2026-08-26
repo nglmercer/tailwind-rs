@@ -247,6 +247,8 @@ test("fails the Bun build for errors and keeps warnings visible", async () => {
     );
     assert.match(warnings.join("\n"), /UTILITY002/);
     assert.match(warnings.join("\n"), /help: remove the fixture marker/);
+    assert.match(warnings.join("\n"), /line 1, column 3/);
+    assert.match(warnings.join("\n"), /\| export const classes/);
   } finally {
     console.warn = originalWarn;
     await rm(root, { recursive: true, force: true });
@@ -328,14 +330,24 @@ test("recovers after an incremental diagnostic and handles graph creation/remova
     "a.ts": 'export const classes = "p-4";',
     "b.ts": 'export const classes = "flex";'
   });
-  const plugin = utilitycss({ native: FakeNativeCompiler });
+  const plugin = utilitycss({ native: FakeNativeCompiler, debug: true });
+  const debugErrors: string[] = [];
+  const originalError = console.error;
+  console.error = (...values: unknown[]) => debugErrors.push(values.join(" "));
   try {
     const first = await build(root, plugin, "entry.ts");
     assert.match(first.css, /\.p-4/);
     assert.match(first.css, /\.flex/);
 
     await writeFile(join(root, "a.ts"), 'export const classes = "utility-error";');
-    await assert.rejects(() => build(root, plugin, "entry.ts"), /Bundle failed/);
+    let failure: unknown;
+    try {
+      await build(root, plugin, "entry.ts");
+    } catch (error) {
+      failure = error;
+    }
+    assert.ok(failure);
+    assert.match(debugErrors.join("\n"), /Bun HMR keeps the last successful bundle/);
 
     await writeFile(join(root, "a.ts"), 'export const classes = "p-8";');
     await writeFile(join(root, "entry.ts"), 'import "./a.ts"; import "./c.ts"; import "utilitycss";');
@@ -346,6 +358,7 @@ test("recovers after an incremental diagnostic and handles graph creation/remova
     assert.match(recovered.css, /\.grid/);
     assert.doesNotMatch(recovered.css, /\.flex/);
   } finally {
+    console.error = originalError;
     await rm(root, { recursive: true, force: true });
   }
 });

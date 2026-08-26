@@ -82,6 +82,8 @@ The plugin MUST:
 - defer the virtual CSS load until source modules have been loaded;
 - normalize file URLs, `/@fs/` IDs, separators, queries, and real paths;
 - fail builds for compiler errors and expose warnings with their structured source information;
+- support opt-in `debug` lifecycle logs that identify failed HMR rebuilds and the retained
+  last-successful bundle, with source locations and code frames where source text is available;
 - regenerate CSS from the current module graph so deleted modules cannot leave stale utilities;
 - transform imported `.css` files through the native stylesheet API and report `@apply` diagnostics;
 - rely on `Bun.serve({ development: { hmr: true } })` for frontend graph/HMR behavior in development;

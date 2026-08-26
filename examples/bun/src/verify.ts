@@ -21,10 +21,12 @@ const result = await buildProduction({ write: false });
 assert(result.success, `Bun production build failed: ${result.logs.map((log) => log.message).join("\n")}`);
 const cssOutputs = await Promise.all(
   result.outputs
-    .map(async (output, index) => ({ path: result.outputs[index].path, contents: await output.text() }))
+    .filter((output) => output.path.endsWith(".css"))
+    .map(async (output) => ({ path: output.path, contents: await output.text() }))
 );
-const css = cssOutputs.find((output) => output.path.endsWith(".css"))?.contents ?? "";
+const css = cssOutputs.map((output) => output.contents).join("\n");
 assert(css.length > 0, "Bun production build did not emit a CSS asset");
+assert(css.includes(".app-shell"), "Bun production build did not include src/style.css");
 const expectedOutput = [
   ".flex",
   ".grid",

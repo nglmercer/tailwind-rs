@@ -78,7 +78,9 @@ The repository example at `examples/bun` is the integration reference. Its `bunf
 `bun --hot src/server.ts`; `src/production-build.ts` covers explicit `Bun.build()` production
 usage; and `bun run verify` covers compiler loading, CSS output, and mock API behavior. The browser
 entry is a typed Preact application in `src/app.tsx`; Preact is example-level UI code and MUST NOT
-become a dependency of the compiler or Bun adapter packages.
+become a dependency of the compiler or Bun adapter packages. The example keeps visual design in
+`src/style.css` and repeated static utility combinations in `src/styles.ts`; it MUST NOT claim
+Tailwind `@apply` compatibility without a dedicated CSS-entry implementation and conformance suite.
 
 ## Working method
 

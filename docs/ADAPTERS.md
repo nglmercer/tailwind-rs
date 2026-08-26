@@ -91,6 +91,8 @@ export, which lets Bun load it directly from `bunfig.toml`.
 The repository example in [`examples/bun`](../examples/bun/) uses Preact for its browser UI. Preact
 is an application dependency, not part of the Bun adapter: `@utilitycss/node` remains the generic
 compiler lifecycle API, while `@utilitycss/bun` supplies Bun bundler/fullstack/HMR hooks.
+The example keeps semantic presentation rules in `style.css` and uses static `cn(...)` recipes for
+repeated utility combinations; it does not claim to implement Tailwind's `@apply` directive.
 
 ## Deno
 

@@ -29,10 +29,9 @@ if (import.meta.main) {
   }
 
   const cssOutputs = await Promise.all(
-    result.outputs
-      .map(async (output, index) => ({ path: result.outputs[index].path, contents: await output.text() }))
+    result.outputs.filter((output) => output.path.endsWith(".css")).map((output) => output.text())
   );
-  const css = cssOutputs.find((output) => output.path.endsWith(".css"))?.contents ?? "";
+  const css = cssOutputs.join("\n");
   if (!css.includes(".p-4") || !css.includes(".flex")) {
     throw new Error("Bun production build did not include generated utilitycss CSS");
   }

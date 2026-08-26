@@ -61,10 +61,14 @@ plugins = ["@utilitycss/bun"]
 
 ## How the example is structured
 
-- `src/index.html` is the Bun HTML entry and requests the virtual stylesheet with
-  `<link rel="stylesheet" href="utilitycss" />`.
-- `src/app.tsx` is the Preact browser application. It contains typed components, hooks, the auth
-  form, and the authenticated compiler dashboard.
+- `src/index.html` is the Bun HTML entry and links both `./style.css` and the virtual stylesheet
+  with `<link rel="stylesheet" href="utilitycss" />`.
+- `src/style.css` contains the app's semantic component styling and responsive presentation rules.
+- `src/app.tsx` owns only application state and composition; the Preact UI is split into focused
+  files under `src/components/`.
+- `src/styles.ts` contains reusable `cn(...)` utility recipes. Bun extracts the static utility
+  strings from this module, which keeps component markup readable without hiding compiler input.
+- `src/api.ts` and `src/types.ts` isolate the browser transport and shared domain types.
 - `src/server.ts` imports the HTML route and delegates `/api/*` requests to the mock API.
 - `src/production-build.ts` proves that an explicit `Bun.build()` can use the same plugin in a
   production bundle.
@@ -100,6 +104,7 @@ The server exposes these same-origin endpoints:
 ## What it demonstrates
 
 - Preact components and hooks bundled from TSX through Bun;
+- semantic CSS in `style.css` plus reusable utility recipes for repeated layout patterns;
 - virtual CSS generated from HTML and TSX module-graph sources;
 - spacing, sizing, colors, radius, flexbox, and grid utilities;
 - arbitrary values such as `max-w-[42rem]` and `hover:`/responsive `md:` variants;
@@ -108,3 +113,11 @@ The server exposes these same-origin endpoints:
 - Bun HMR without `public/utilitycss.css` or a separate utilitycss watch process.
 
 The production `dist/` output and local `node_modules/` are ignored by this example's `.gitignore`.
+
+## Styling recommendation
+
+This example deliberately does not add a partial `@apply` implementation. The recommended split is
+to keep product-specific visual design in `style.css` and use `styles.ts` for small, static utility
+recipes that should remain visible to the compiler. A future `@apply` feature belongs in the
+compiler's CSS-entry pipeline and MUST define parsing, cascade/layer behavior, diagnostics, and
+conformance tests before it is presented as Tailwind-compatible behavior.

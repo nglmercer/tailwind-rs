@@ -79,9 +79,11 @@ or a transform based on a CSS entry directive.
 
 The plugin should avoid rescanning the full project on every HMR update.
 
-## SWC
+## SWC and framework extraction
 
-SWC is an optional smart extraction path.
+`utilitycss-swc` is the production JavaScript-family extraction path. The CLI and N-API binding use
+it automatically for JavaScript, TypeScript, JSX, and TSX inputs when the host does not provide
+candidate spans.
 
 Use cases:
 
@@ -90,7 +92,9 @@ Use cases:
 - constrained static expression evaluation,
 - framework-specific syntax.
 
-SWC extraction produces candidates. It does not generate CSS semantics independently.
+SWC extraction produces candidates. It does not generate CSS semantics independently. Vue, Svelte,
+and Astro markup use the conservative framework extractor for static `:class`, `class:`, and
+`class:list` forms; dynamic bindings remain intentionally unsupported.
 
 ```text
 SWC AST
@@ -116,6 +120,10 @@ Every adapter must pass the same behavior fixtures:
 - config,
 - expected diagnostics,
 - expected CSS.
+
+The Rust conformance fixtures live under `crates/utilitycss-compiler/tests/fixtures`. Native Node
+smoke coverage is run after a platform N-API build; the regular JavaScript tests use injectable
+fakes so they remain runnable without a native binary.
 
 This prevents semantic drift.
 

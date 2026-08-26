@@ -6,6 +6,7 @@ rust-version.workspace = true
 version.workspace = true
 
 [dependencies]
+regex = "=1.13.1"
 utilitycss-scanner = { path = "../utilitycss-scanner" }
 utilitycss-span = { path = "../utilitycss-span" }
 

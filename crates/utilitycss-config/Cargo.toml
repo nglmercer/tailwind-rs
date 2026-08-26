@@ -9,6 +9,8 @@ version.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 utilitycss-css-ir = { path = "../utilitycss-css-ir" }
+utilitycss-utilities = { path = "../utilitycss-utilities" }
+utilitycss-variants = { path = "../utilitycss-variants" }
 utilitycss-theme = { path = "../utilitycss-theme" }
 
 [lints]

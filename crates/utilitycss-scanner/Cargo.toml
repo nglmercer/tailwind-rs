@@ -8,5 +8,8 @@ version.workspace = true
 [dependencies]
 utilitycss-span = { path = "../utilitycss-span" }
 
+[dev-dependencies]
+proptest = "=1.11.0"
+
 [lints]
 workspace = true

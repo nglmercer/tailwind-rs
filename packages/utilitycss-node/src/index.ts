@@ -31,6 +31,7 @@ export interface BuildResult {
 /** The native compiler surface consumed by this adapter. */
 export interface NativeCompiler {
   updateSource(id: string, content: string, path?: string, candidates?: readonly CandidateInput[]): void;
+  extractCandidates?(content: string, path?: string): readonly CandidateInput[];
   removeSource(id: string): boolean;
   build(): unknown;
 }
@@ -69,7 +70,8 @@ export class Compiler {
     candidates?: readonly CandidateInput[]
   ): void {
     this.assertActive();
-    this.native.updateSource(id, content, path, candidates);
+    const extracted = candidates ?? this.native.extractCandidates?.(content, path);
+    this.native.updateSource(id, content, path, extracted);
   }
 
   /** Removes source content and returns whether the source existed. */

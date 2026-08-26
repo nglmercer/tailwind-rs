@@ -9,7 +9,9 @@ use napi::{Error, Result, Status};
 use napi_derive::napi;
 use utilitycss_compiler::{CandidateInput, Compiler as CoreCompiler, CompilerConfig, SourceInput};
 use utilitycss_css_ir::CssSerializationMode;
+use utilitycss_extractor::{extract_for_framework, Framework};
 use utilitycss_span::{SourceId, Span};
+use utilitycss_swc::{extract as extract_swc, SourceKind as SwcSourceKind};
 
 /// A diagnostic returned across the N-API boundary.
 #[napi(object)]
@@ -122,6 +124,34 @@ impl Compiler {
         }
     }
 
+    /// Extracts static class candidates using SWC or the selected framework adapter.
+    #[napi]
+    pub fn extract_candidates(
+        &self,
+        content: String,
+        path: Option<String>,
+    ) -> Result<Vec<JsCandidate>> {
+        let candidates = match source_kind(path.as_deref()) {
+            SourceKind::JavaScript(kind) => extract_swc(&content, kind)
+                .map_err(|error| Error::new(Status::InvalidArg, error.to_string()))?
+                .into_iter()
+                .map(|candidate| (candidate.raw(), candidate.span()))
+                .collect::<Vec<_>>(),
+            SourceKind::Framework(framework) => extract_for_framework(&content, framework)
+                .into_iter()
+                .map(|candidate| (candidate.raw(), candidate.span()))
+                .collect(),
+        };
+        Ok(candidates
+            .into_iter()
+            .map(|(raw, span)| JsCandidate {
+                raw: raw.to_owned(),
+                start: span.start(),
+                end: span.end(),
+            })
+            .collect())
+    }
+
     /// Removes one source unit and returns whether it existed.
     #[napi]
     pub fn remove_source(&mut self, id: String) -> bool {
@@ -163,4 +193,26 @@ impl Compiler {
 
 fn saturating_u32(value: usize) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
+}
+
+enum SourceKind {
+    JavaScript(SwcSourceKind),
+    Framework(Framework),
+}
+
+fn source_kind(path: Option<&str>) -> SourceKind {
+    let extension = path
+        .map(std::path::Path::new)
+        .and_then(std::path::Path::extension)
+        .and_then(|extension| extension.to_str());
+    match extension {
+        Some("js") | Some("mjs") | Some("cjs") => SourceKind::JavaScript(SwcSourceKind::JavaScript),
+        Some("jsx") | Some("mjsx") | Some("cjsx") => SourceKind::JavaScript(SwcSourceKind::Jsx),
+        Some("ts") | Some("mts") | Some("cts") => SourceKind::JavaScript(SwcSourceKind::TypeScript),
+        Some("tsx") | Some("mtsx") | Some("ctsx") => SourceKind::JavaScript(SwcSourceKind::Tsx),
+        Some("vue") => SourceKind::Framework(Framework::Vue),
+        Some("svelte") => SourceKind::Framework(Framework::Svelte),
+        Some("astro") => SourceKind::Framework(Framework::Astro),
+        _ => SourceKind::Framework(Framework::Html),
+    }
 }

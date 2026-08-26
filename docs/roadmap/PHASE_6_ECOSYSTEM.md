@@ -6,10 +6,10 @@ Expand capabilities without compromising the simple compiler core.
 
 ## SWC smart extractor
 
-The first increment is a dependency-free static extractor for quoted class attributes and known
-class helper calls. It feeds candidate text and spans toward the same compiler pipeline and does
-not evaluate expressions. A full SWC AST adapter remains optional until its dependency and
-version-isolation costs are justified.
+The dependency-free extractor remains the low-cost fallback. The production JavaScript-family
+path is now `utilitycss-swc`, pinned to the current SWC parser/AST/visitor releases used by the
+workspace. It feeds candidate text and byte spans toward the same compiler pipeline and does not
+evaluate expressions.
 
 Potentially understand:
 
@@ -25,13 +25,15 @@ Do not execute user code.
 
 ## Framework extractors
 
-Possible adapters:
+Available static adapters:
 
-- React/JSX,
-- Solid,
-- Vue,
-- Svelte,
-- templating languages.
+- React/JSX and Solid-like JSX through SWC,
+- Vue `:class`/`v-bind:class` literals,
+- Svelte `class:` directives,
+- Astro `class:list` literals,
+- plain HTML-like templates through the conservative extractor.
+
+Framework adapters MUST remain conservative and MUST document unsupported dynamic forms.
 
 The text scanner remains the baseline.
 
@@ -50,17 +52,22 @@ Prefer declarative plugin descriptions where possible.
 
 ## IDE services
 
-Potential shared services:
+The `utilitycss-lsp` crate now provides:
 
 - candidate parse API,
 - validation,
 - completion metadata,
 - hover docs,
-- class-to-generated-CSS preview.
+- basic candidate hover information.
+
+Class-to-generated-CSS preview and workspace-aware configuration reload remain future increments.
 
 ## Compatibility presets
 
-May add opt-in syntax/theme presets for migration from other utility frameworks.
+The config crate now provides a versioned `utilitycss` baseline and an explicitly named
+`tailwind-v4-subset` profile, plus declarative utility and variant extensions. This is not full
+Tailwind compatibility. Any broader compatibility MUST add a conformance suite before being
+advertised.
 
 Do not claim full compatibility without a conformance suite.
 

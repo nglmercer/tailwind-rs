@@ -227,7 +227,7 @@ fn apply_one(
         }
         VariantKind::Named { name, value } => {
             if let Some(definition) = registry.get(name) {
-                return Ok(apply_definition(definition, rule));
+                return apply_definition(name, definition, rule);
             }
             if let Some(value) = value {
                 if matches!(name, "data" | "aria") {
@@ -252,16 +252,33 @@ fn apply_one(
     }
 }
 
-fn apply_definition(definition: &VariantDefinition, rule: CssRule) -> CssRule {
+fn apply_definition(
+    name: &str,
+    definition: &VariantDefinition,
+    rule: CssRule,
+) -> Result<CssRule, VariantError> {
     match definition {
         VariantDefinition::Pseudo { suffix, .. } => {
-            rule.map_selectors(|selector| format!("{selector}{suffix}"))
+            let suffix = safe_selector(suffix, name)?;
+            if !suffix.starts_with(':') {
+                return Err(VariantError::new(VariantErrorKind::InvalidValue, name, Some(suffix)));
+            }
+            Ok(rule.map_selectors(|selector| format!("{selector}{suffix}")))
         }
         VariantDefinition::Media { name, prelude, .. } => {
-            CssRule::at_rule(rule.order(), name, prelude, vec![rule])
+            if name.is_empty()
+                || !name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+            {
+                return Err(VariantError::new(VariantErrorKind::UnsafeSelector, name, Some(name)));
+            }
+            let prelude = safe_selector(prelude, name)?;
+            Ok(CssRule::at_rule(rule.order(), name, prelude, vec![rule]))
         }
         VariantDefinition::Ancestor { prefix, .. } => {
-            rule.map_selectors(|selector| format!("{prefix}{selector}"))
+            let prefix = safe_selector(prefix, name)?;
+            Ok(rule.map_selectors(|selector| format!("{prefix}{selector}")))
         }
     }
 }
@@ -279,9 +296,16 @@ fn apply_attribute(
 }
 
 fn safe_selector<'a>(selector: &'a str, name: &str) -> Result<&'a str, VariantError> {
-    if selector.chars().any(|character| matches!(character, '{' | '}' | ';' | '\n' | '\r'))
+    let contains_style_close = selector
+        .as_bytes()
+        .windows(b"</style".len())
+        .any(|window| window.eq_ignore_ascii_case(b"</style"));
+    if selector
+        .chars()
+        .any(|character| character.is_control() || matches!(character, '{' | '}' | ';'))
         || selector.contains("/*")
         || selector.contains("*/")
+        || contains_style_close
     {
         return Err(VariantError::new(VariantErrorKind::UnsafeSelector, name, Some(selector)));
     }
@@ -361,5 +385,17 @@ mod tests {
             .expect_err("variant is not registered");
 
         assert_eq!(error.kind(), VariantErrorKind::UnknownVariant);
+    }
+
+    #[test]
+    fn rejects_unsafe_registered_variant_definitions() {
+        let mut registry = VariantRegistry::new();
+        registry.register("unsafe", super::VariantDefinition::pseudo(":hover;body{}", 999));
+        let candidate = parse("unsafe:flex").expect("candidate is valid");
+
+        let error = apply(&candidate, base_rule(), &Theme::default(), &registry)
+            .expect_err("unsafe registered selector is rejected");
+
+        assert_eq!(error.kind(), VariantErrorKind::UnsafeSelector);
     }
 }

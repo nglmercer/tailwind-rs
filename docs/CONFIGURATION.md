@@ -47,14 +47,33 @@ Example:
 
 ```json
 {
+  "preset": "utilitycss",
   "theme": {
-    "spacingBase": "0.25rem"
+    "spacing": { "4": "1rem" }
   },
-  "features": {
-    "arbitraryValues": true
+  "utilities": {
+    "content-center": {
+      "type": "static",
+      "property": "place-content",
+      "value": "center",
+      "order": 63
+    }
+  },
+  "variants": {
+    "motion-safe": {
+      "type": "media",
+      "name": "media",
+      "prelude": "(prefers-reduced-motion: no-preference)",
+      "order": 170
+    }
   }
 }
 ```
+
+The accepted preset names are `utilitycss` and the explicitly limited
+`tailwind-v4-subset`. The latter is a compatibility profile for the semantics implemented by this
+workspace; it MUST NOT be treated as full Tailwind compatibility. Utility and variant plugin
+entries are declarative, deterministic, and validated before compilation.
 
 ## JavaScript configuration
 

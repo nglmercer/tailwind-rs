@@ -9,6 +9,7 @@ version.workspace = true
 utilitycss-scanner = { path = "../utilitycss-scanner" }
 utilitycss-span = { path = "../utilitycss-span" }
 utilitycss-syntax = { path = "../utilitycss-syntax" }
+utilitycss-swc = { path = "../utilitycss-swc" }
 
 [[bench]]
 name = "foundation"

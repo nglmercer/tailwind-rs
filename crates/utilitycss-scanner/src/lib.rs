@@ -140,6 +140,8 @@ fn is_candidate_continue(character: char) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
+
     use super::scan;
 
     fn contains(source: &str, expected: &str) -> bool {
@@ -191,5 +193,12 @@ mod tests {
         let tokens = scan(&source);
 
         assert_eq!(tokens.iter().filter(|token| token.raw() == "p-4").count(), 10_000);
+    }
+
+    proptest! {
+        #[test]
+        fn arbitrary_utf8_input_never_panics(source in any::<String>()) {
+            let _ = scan(&source);
+        }
     }
 }

@@ -4,7 +4,7 @@
 
 It treats utility class names as a small domain-specific language and is designed to serve native Rust applications, a CLI, and thin integrations for Node.js, Bun, Deno, Vite, and SWC-based toolchains. The compiler core owns semantics; host runtimes own I/O and lifecycle integration.
 
-> Status: Phase 6 ecosystem work in progress. The workspace, deterministic scanner/parser, typed theme and utility layers, incremental compiler, declarative config, native CLI, versioned protocol, N-API/WASM bindings, thin Node/Vite/WASM wrappers, and conservative static extraction are present. Full AST extraction, broader ecosystem support, and release hardening remain on the roadmap. `utilitycss` is the working package name and may change before the first stable release.
+> Status: production-readiness implementation in progress. The workspace now includes SWC AST extraction, Vue/Svelte/Astro static framework extraction, versioned registry presets/plugins, an LSP adapter, conformance fixtures, native extraction smoke coverage, and malformed-input property tests. Full Tailwind compatibility, broader framework semantics, and release hardening still require their explicit gates; `utilitycss` remains pre-1.0.
 
 ## Design goals
 
@@ -75,6 +75,7 @@ The initial workspace is intentionally small and runtime-independent:
 - [`utilitycss-diagnostics`](./crates/utilitycss-diagnostics/) — typed, source-aware diagnostics.
 - [`utilitycss-scanner`](./crates/utilitycss-scanner/) — language-agnostic candidate discovery with spans.
 - [`utilitycss-extractor`](./crates/utilitycss-extractor/) — conservative static extraction from class attributes and common class helpers.
+- [`utilitycss-swc`](./crates/utilitycss-swc/) — SWC AST extraction for JavaScript, TypeScript, JSX, and TSX with byte-accurate spans.
 - [`utilitycss-syntax`](./crates/utilitycss-syntax/) — borrowed candidate AST and DSL parser.
 - [`utilitycss-theme`](./crates/utilitycss-theme/) — deterministic typed design tokens.
 - [`utilitycss-utilities`](./crates/utilitycss-utilities/) — extensible initial utility registry and lowering.
@@ -85,11 +86,12 @@ The initial workspace is intentionally small and runtime-independent:
 - [`utilitycss-cli`](./crates/utilitycss-cli/) — native build/watch adapter.
 - [`utilitycss-napi`](./crates/utilitycss-napi/) and [`utilitycss-wasm`](./crates/utilitycss-wasm/) — thin native/WASM bindings.
 - [`utilitycss-protocol`](./crates/utilitycss-protocol/) — versioned typed/JSON transport messages for external hosts.
+- [`utilitycss-lsp`](./crates/utilitycss-lsp/) — stdio Language Server Protocol adapter with diagnostics, completion, and hover.
 - [`utilitycss-bench`](./crates/utilitycss-bench/) — dependency-free scanner/parser benchmark harness.
 - [`@utilitycss/node`](./packages/utilitycss-node/) and [`@utilitycss/vite`](./packages/utilitycss-vite/) — TypeScript lifecycle adapters.
 - [`@utilitycss/wasm`](./packages/utilitycss-wasm/) — TypeScript wrapper for generated WASM bindings.
 
-The facade currently compiles the documented initial utility and variant subset. It remains intentionally conservative: scanner false positives are ignored, unknown syntax is reported as structured diagnostics when appropriate, and arbitrary CSS fragments are validated before lowering.
+The facade currently compiles the documented initial utility and variant subset. It remains intentionally conservative: scanner false positives are ignored, unknown syntax is reported as structured diagnostics when appropriate, and arbitrary CSS fragments are validated before lowering. See [`docs/PRODUCTION_CONTRACT.md`](./docs/PRODUCTION_CONTRACT.md) for the support and release contract.
 
 ## Compatibility
 
@@ -107,7 +109,7 @@ The roadmap is organized around compiler risk:
 4. **Variants and incremental compilation** — variant composition, invalidation, and watch benchmarks.
 5. **CLI and bindings** — native CLI, N-API, WASM where useful, and a versioned protocol.
 6. **Host adapters** — Vite integration plus Node/Bun/Deno lifecycle and invalidation bridges.
-7. **Ecosystem** — optional AST-assisted extraction, extensions, IDE services, and compatibility presets.
+7. **Ecosystem** — AST-assisted extraction, framework adapters, declarative extensions, IDE services, and compatibility presets.
 
 The detailed phase documents and release milestones are in [`docs/ROADMAP.md`](./docs/ROADMAP.md).
 
@@ -140,6 +142,7 @@ Start with [`LLMS.md`](./LLMS.md) for agent guidance, [`docs/VISION.md`](./docs/
 - [`docs/OBSERVABILITY.md`](./docs/OBSERVABILITY.md) — optional statistics, tracing, and privacy rules.
 - [`docs/PERFORMANCE.md`](./docs/PERFORMANCE.md) — performance targets and benchmark guidance.
 - [`docs/TESTING.md`](./docs/TESTING.md) — unit, integration, snapshot, fuzz, and conformance strategy.
+- [`docs/PRODUCTION_TEST_MATRIX.md`](./docs/PRODUCTION_TEST_MATRIX.md) — executable local and CI test gates.
 - [`docs/SECURITY.md`](./docs/SECURITY.md) — threat model and safe handling of untrusted input.
 - [`docs/CODE_STYLE.md`](./docs/CODE_STYLE.md) — Rust, TypeScript, and JavaScript conventions.
 
@@ -182,6 +185,14 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 cargo bench -p utilitycss-bench
+```
+
+The conformance fixtures can be run directly with:
+
+```bash
+cargo test -p utilitycss-compiler --test conformance
+cargo test -p utilitycss-swc
+cargo test -p utilitycss-lsp
 ```
 
 These commands validate the current Rust workspace. They do not imply that every later roadmap feature is implemented.

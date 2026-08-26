@@ -8,10 +8,25 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
-use std::ops::Range;
+use std::{collections::BTreeSet, ops::Range, sync::OnceLock};
 
+use regex::Regex;
 use utilitycss_scanner::scan;
 use utilitycss_span::Span;
+
+/// Framework syntax that can be statically extracted without evaluating application code.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Framework {
+    /// Plain HTML-like markup.
+    #[default]
+    Html,
+    /// Vue single-file component templates.
+    Vue,
+    /// Svelte component markup.
+    Svelte,
+    /// Astro component markup.
+    Astro,
+}
 
 /// A statically visible candidate and its byte span in the original source.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -60,6 +75,158 @@ pub fn extract(source: &str) -> Vec<ExtractedCandidate<'_>> {
         })
         .map(|token| ExtractedCandidate::new(token.raw(), token.span()))
         .collect()
+}
+
+/// Extracts candidates using the static class forms of a supported framework template.
+///
+/// This supplements [`extract`] with Vue `:class`/`v-bind:class` literals, Svelte `class:`
+/// directives, and Astro `class:list` expressions. It deliberately does not evaluate bindings;
+/// only source literals and directive names are returned.
+#[must_use]
+pub fn extract_for_framework(source: &str, framework: Framework) -> Vec<ExtractedCandidate<'_>> {
+    let mut candidates = extract(source);
+    let ranges = match framework {
+        Framework::Html => Vec::new(),
+        Framework::Vue => vue_ranges(source),
+        Framework::Svelte => svelte_ranges(source),
+        Framework::Astro => astro_ranges(source),
+    };
+    let existing = candidates
+        .iter()
+        .map(|candidate| (candidate.span(), candidate.raw()))
+        .collect::<BTreeSet<_>>();
+    let mut seen = existing;
+    let comments = comment_ranges(source.as_bytes());
+    for range in ranges {
+        if comments.iter().any(|comment| comment.start <= range.start && range.end <= comment.end) {
+            continue;
+        }
+        let Some(region) = source.get(range.clone()) else {
+            continue;
+        };
+        for token in scan(region) {
+            let local_start = usize::try_from(token.span().start()).unwrap_or(usize::MAX);
+            let local_end = usize::try_from(token.span().end()).unwrap_or(usize::MAX);
+            let Some(start) = range.start.checked_add(local_start) else {
+                continue;
+            };
+            let Some(end) = range.start.checked_add(local_end) else {
+                continue;
+            };
+            let Some(raw) = source.get(start..end) else {
+                continue;
+            };
+            let Some(span) = Span::new(
+                u32::try_from(start).unwrap_or(u32::MAX),
+                u32::try_from(end).unwrap_or(u32::MAX),
+            ) else {
+                continue;
+            };
+            if seen.insert((span, raw)) {
+                candidates.push(ExtractedCandidate::new(raw, span));
+            }
+        }
+    }
+    candidates.sort_by_key(|candidate| (candidate.span().start(), candidate.span().end()));
+    candidates
+}
+
+fn vue_ranges(source: &str) -> Vec<Range<usize>> {
+    let regex = vue_class_binding_regex();
+    regex
+        .captures_iter(source)
+        .flat_map(|captures| {
+            let whole = captures.get(0)?;
+            let value_start = whole.end();
+            let quote = source.as_bytes().get(value_start).copied()?;
+            if !matches!(quote, b'\'' | b'"') {
+                return None;
+            }
+            let content_start = value_start + 1;
+            let content_end = quoted_end(source.as_bytes(), content_start, quote)?;
+            Some(string_ranges(source.as_bytes(), content_start, content_end))
+        })
+        .flatten()
+        .collect()
+}
+
+fn svelte_ranges(source: &str) -> Vec<Range<usize>> {
+    let regex = svelte_class_directive_regex();
+    regex
+        .captures_iter(source)
+        .filter_map(|captures| captures.name("class").map(|class| class.start()..class.end()))
+        .collect()
+}
+
+fn astro_ranges(source: &str) -> Vec<Range<usize>> {
+    let regex = astro_class_list_regex();
+    regex
+        .captures_iter(source)
+        .flat_map(|captures| {
+            let whole = captures.get(0)?;
+            let mut start = whole.end();
+            while source.as_bytes().get(start).is_some_and(|byte| byte.is_ascii_whitespace()) {
+                start += 1;
+            }
+            if source.as_bytes().get(start) != Some(&b'{') {
+                return None;
+            }
+            let end = braced_expression_end(source.as_bytes(), start)?;
+            Some(string_ranges(source.as_bytes(), start + 1, end))
+        })
+        .flatten()
+        .collect()
+}
+
+fn vue_class_binding_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX
+        .get_or_init(|| Regex::new(r"(?i)(?::class|v-bind:class)\s*=\s*").expect("valid Vue regex"))
+}
+
+fn svelte_class_directive_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(r"(?x)\bclass:(?P<class>[A-Za-z0-9_:/\\.\[\]-]+)").expect("valid Svelte regex")
+    })
+}
+
+fn astro_class_list_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| Regex::new(r"(?i)\bclass:list\s*=\s*").expect("valid Astro regex"))
+}
+
+fn braced_expression_end(bytes: &[u8], open: usize) -> Option<usize> {
+    let mut depth = 0_u32;
+    let mut cursor = open;
+    let mut quote = None;
+    let mut escaped = false;
+    while cursor < bytes.len() {
+        let byte = bytes[cursor];
+        if let Some(active_quote) = quote {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == active_quote {
+                quote = None;
+            }
+            cursor += 1;
+            continue;
+        }
+        if matches!(byte, b'\'' | b'"' | b'`') {
+            quote = Some(byte);
+        } else if byte == b'{' {
+            depth = depth.saturating_add(1);
+        } else if byte == b'}' {
+            depth = depth.saturating_sub(1);
+            if depth == 0 {
+                return Some(cursor);
+            }
+        }
+        cursor += 1;
+    }
+    None
 }
 
 fn attribute_ranges(source: &str) -> Vec<Range<usize>> {
@@ -153,6 +320,7 @@ fn string_ranges(bytes: &[u8], start: usize, end: usize) -> Vec<Range<usize>> {
 
 fn starts_with_name(bytes: &[u8], start: usize, name: &[u8]) -> bool {
     starts_with_identifier(bytes, start, name)
+        && bytes.get(start.wrapping_sub(1)) != Some(&b':')
         && (name != b"class" || bytes.get(start + name.len()) != Some(&b':'))
 }
 
@@ -229,6 +397,16 @@ fn comment_ranges(bytes: &[u8]) -> Vec<Range<usize>> {
     let mut escaped = false;
     while cursor < bytes.len() {
         let byte = bytes[cursor];
+        if quote.is_none() && bytes.get(cursor..cursor + 4) == Some(b"<!--") {
+            let start = cursor;
+            cursor += 4;
+            while cursor + 2 < bytes.len() && bytes.get(cursor..cursor + 3) != Some(b"-->") {
+                cursor += 1;
+            }
+            cursor = (cursor + 3).min(bytes.len());
+            ranges.push(start..cursor);
+            continue;
+        }
         if let Some(active_quote) = quote {
             if escaped {
                 escaped = false;
@@ -269,7 +447,7 @@ fn comment_ranges(bytes: &[u8]) -> Vec<Range<usize>> {
 
 #[cfg(test)]
 mod tests {
-    use super::extract;
+    use super::{extract, extract_for_framework, Framework};
 
     fn raws(source: &str) -> Vec<&str> {
         extract(source).into_iter().map(|candidate| candidate.raw()).collect()
@@ -322,5 +500,57 @@ mod tests {
         "#;
 
         assert_eq!(raws(source), vec!["p-8"]);
+    }
+
+    #[test]
+    fn extracts_vue_bound_class_literals() {
+        let source = r#"<button :class="{ 'text-red-500': active, 'font-bold': strong }" />"#;
+
+        assert_eq!(
+            extract_for_framework(source, Framework::Vue)
+                .into_iter()
+                .map(|candidate| candidate.raw())
+                .collect::<Vec<_>>(),
+            vec!["text-red-500", "font-bold"]
+        );
+    }
+
+    #[test]
+    fn extracts_svelte_class_directives() {
+        let source = r#"<div class:flex={wide} class:md:hover:bg-blue-500={active}></div>"#;
+
+        assert_eq!(
+            extract_for_framework(source, Framework::Svelte)
+                .into_iter()
+                .map(|candidate| candidate.raw())
+                .collect::<Vec<_>>(),
+            vec!["flex", "md:hover:bg-blue-500"]
+        );
+    }
+
+    #[test]
+    fn extracts_astro_class_list_literals() {
+        let source = r#"<div class:list={['p-4', active && 'text-red-500']}></div>"#;
+
+        assert_eq!(
+            extract_for_framework(source, Framework::Astro)
+                .into_iter()
+                .map(|candidate| candidate.raw())
+                .collect::<Vec<_>>(),
+            vec!["p-4", "text-red-500"]
+        );
+    }
+
+    #[test]
+    fn ignores_framework_syntax_inside_comments() {
+        let source = r#"<!-- :class="'p-4'" --> <div class:list={['flex']}></div>"#;
+
+        assert_eq!(
+            extract_for_framework(source, Framework::Vue)
+                .into_iter()
+                .map(|candidate| candidate.raw())
+                .collect::<Vec<_>>(),
+            Vec::<&str>::new()
+        );
     }
 }

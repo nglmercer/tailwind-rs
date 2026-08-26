@@ -9,5 +9,8 @@ version.workspace = true
 utilitycss-diagnostics = { path = "../utilitycss-diagnostics" }
 utilitycss-span = { path = "../utilitycss-span" }
 
+[dev-dependencies]
+proptest = "=1.11.0"
+
 [lints]
 workspace = true

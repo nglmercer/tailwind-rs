@@ -303,7 +303,7 @@ struct CandidateCacheEntry {
 pub struct Compiler {
     config: CompilerConfig,
     sources: BTreeMap<SourceId, SourceInput>,
-    source_candidates: BTreeMap<SourceId, BTreeMap<String, Span>>,
+    source_candidates: BTreeMap<SourceId, BTreeMap<String, Vec<Span>>>,
     candidate_sources: BTreeMap<String, BTreeSet<SourceId>>,
     candidate_cache: BTreeMap<String, CandidateCacheEntry>,
     pending_stats: CompileStats,
@@ -360,12 +360,12 @@ impl Compiler {
         }
         let source_id = source.id().clone();
 
-        let mut new_candidates = BTreeMap::new();
+        let mut new_candidates: BTreeMap<String, Vec<Span>> = BTreeMap::new();
         let mut candidates_found = 0;
         for candidate in candidates {
             validate_candidate(&source, &candidate)?;
             candidates_found += 1;
-            new_candidates.entry(candidate.raw).or_insert(candidate.span);
+            new_candidates.entry(candidate.raw).or_default().push(candidate.span);
         }
         let previous_candidates =
             self.source_candidates.get(&source_id).cloned().unwrap_or_default();
@@ -448,14 +448,16 @@ impl Compiler {
             }
             if let Some(diagnostic) = entry.diagnostic {
                 for source_id in source_ids {
-                    if let Some(span) = self
+                    if let Some(spans) = self
                         .source_candidates
                         .get(source_id)
                         .and_then(|candidates| candidates.get(raw))
                     {
-                        diagnostics.push(
-                            diagnostic.clone().with_source(source_id.clone()).with_span(*span),
-                        );
+                        for span in spans {
+                            diagnostics.push(
+                                diagnostic.clone().with_source(source_id.clone()).with_span(*span),
+                            );
+                        }
                     }
                 }
             }
@@ -701,5 +703,19 @@ mod tests {
         );
 
         assert!(matches!(result, Err(CompilerError::InvalidCandidateSpan { .. })));
+    }
+
+    #[test]
+    fn diagnostics_preserve_every_duplicate_candidate_occurrence() {
+        let source =
+            SourceInput::new(SourceId::new("src/app.html"), r#"<div class="p-[] p-[]"></div>"#);
+        let mut compiler = Compiler::new(CompilerConfig::new());
+        compiler.update_source(source).expect("source is valid");
+
+        let output = compiler.build();
+        let diagnostics = output.diagnostics().iter().collect::<Vec<_>>();
+
+        assert_eq!(diagnostics.len(), 2);
+        assert_ne!(diagnostics[0].span(), diagnostics[1].span());
     }
 }

@@ -12,6 +12,8 @@ walkdir = "2.5.0"
 utilitycss-css-ir = { path = "../utilitycss-css-ir" }
 utilitycss-compiler = { path = "../utilitycss-compiler" }
 utilitycss-config = { path = "../utilitycss-config" }
+utilitycss-extractor = { path = "../utilitycss-extractor" }
+utilitycss-swc = { path = "../utilitycss-swc" }
 utilitycss-span = { path = "../utilitycss-span" }
 
 [lints]

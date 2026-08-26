@@ -5,6 +5,7 @@ use std::time::Instant;
 
 use utilitycss_scanner::scan;
 use utilitycss_span::Span;
+use utilitycss_swc::{extract as extract_swc, SourceKind};
 use utilitycss_syntax::parse;
 
 fn main() {
@@ -12,6 +13,24 @@ fn main() {
 
     benchmark_spans(ITERATIONS);
     benchmark_scan_and_parse(ITERATIONS);
+    benchmark_swc_extraction(ITERATIONS / 10);
+}
+
+fn benchmark_swc_extraction(iterations: u32) {
+    let source = r#"
+        export const Card = ({ active }) => (
+            <article className={clsx("flex", active && "p-4", `text-${tone}`)} />
+        );
+    "#;
+    let started = Instant::now();
+    let mut extracted = 0_u64;
+    for _ in 0..iterations {
+        let candidates =
+            extract_swc(black_box(source), SourceKind::Jsx).expect("benchmark source is valid JSX");
+        extracted = extracted.wrapping_add(candidates.len() as u64);
+    }
+    let elapsed = started.elapsed();
+    println!("swc extraction: {iterations} iterations in {elapsed:?} (candidates={extracted})");
 }
 
 fn benchmark_spans(iterations: u32) {

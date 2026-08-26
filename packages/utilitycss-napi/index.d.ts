@@ -6,6 +6,8 @@ export declare class Compiler {
   constructor(pretty?: boolean | undefined | null)
   /** Inserts or replaces one source unit. */
   updateSource(id: string, content: string, path?: string | undefined | null, candidates?: Array<JsCandidate> | undefined | null): void
+  /** Extracts static class candidates using SWC or the selected framework adapter. */
+  extractCandidates(content: string, path?: string | undefined | null): Array<JsCandidate>
   /** Removes one source unit and returns whether it existed. */
   removeSource(id: string): boolean
   /** Builds the current sources and returns CSS, diagnostics, and counters. */

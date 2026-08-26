@@ -20,6 +20,7 @@ crates/
   utilitycss-wasm/
   utilitycss-protocol/
   utilitycss-swc/
+  utilitycss-lsp/
   utilitycss-bench/
 ```
 
@@ -107,9 +108,13 @@ facade, but MUST NOT expose internal AST or CSS IR implementation details.
 
 ### `utilitycss-swc`
 
-Optional AST-assisted candidate extractor.
+AST-assisted candidate extractor for JavaScript-family sources. It may depend on SWC crates and
+feeds candidates into the same compiler pipeline.
 
-It may depend on SWC crates and feed candidates into the same compiler pipeline.
+### `utilitycss-lsp`
+
+Language Server Protocol adapter. It owns editor lifecycle state and delegates extraction and
+semantic work to the compiler crates.
 
 ### `utilitycss-bench`
 

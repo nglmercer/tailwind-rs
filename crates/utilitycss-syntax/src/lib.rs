@@ -576,6 +576,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
+
     use utilitycss_span::{SourceId, Span};
 
     use super::{parse, parse_bytes, ParseErrorKind, ValueAst, VariantKind};
@@ -655,5 +657,12 @@ mod tests {
         let second = parse("md:hover:p-4").expect("candidate is valid");
 
         assert_eq!(first, second);
+    }
+
+    proptest! {
+        #[test]
+        fn arbitrary_utf8_candidates_never_panic(candidate in any::<String>()) {
+            let _ = parse(&candidate);
+        }
     }
 }

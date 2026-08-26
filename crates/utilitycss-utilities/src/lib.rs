@@ -284,6 +284,8 @@ pub enum UtilityErrorKind {
     InvalidValue,
     /// A utility that accepts no value received one.
     UnexpectedValue,
+    /// A registered static declaration would produce invalid or unsafe CSS.
+    InvalidDeclaration,
 }
 
 impl UtilityErrorKind {
@@ -296,6 +298,7 @@ impl UtilityErrorKind {
             Self::UnsupportedNegative => "utility.unsupported-negative",
             Self::InvalidValue => "utility.invalid-value",
             Self::UnexpectedValue => "utility.unexpected-value",
+            Self::InvalidDeclaration => "utility.invalid-declaration",
         })
     }
 }
@@ -362,6 +365,13 @@ impl fmt::Display for UtilityError {
             (UtilityErrorKind::UnexpectedValue, Some(value)) => {
                 write!(formatter, "utility `{}` does not accept value `{value}`", self.family)
             }
+            (UtilityErrorKind::InvalidDeclaration, Some(value)) => {
+                write!(
+                    formatter,
+                    "unsafe static declaration `{value}` for utility `{}`",
+                    self.family
+                )
+            }
             _ => write!(formatter, "invalid utility `{}`", self.family),
         }
     }
@@ -425,6 +435,13 @@ pub fn resolve(
     let important = candidate.is_important();
     let declarations = match definition {
         UtilityDefinition::Static { property, value, .. } => {
+            if !safe_property(property) || unsafe_css_fragment(value) {
+                return Err(UtilityError::new(
+                    UtilityErrorKind::InvalidDeclaration,
+                    family,
+                    Some(value),
+                ));
+            }
             if utility.is_negative() {
                 return Err(UtilityError::new(
                     UtilityErrorKind::UnsupportedNegative,
@@ -648,10 +665,7 @@ fn grid_columns_value(value: ValueAst<'_>, family: &str) -> Result<String, Utili
 }
 
 fn safe_arbitrary(content: &str, family: &str) -> Result<String, UtilityError> {
-    if content.chars().any(|character| matches!(character, ';' | '{' | '}' | '\n' | '\r'))
-        || content.contains("/*")
-        || content.contains("*/")
-    {
+    if unsafe_css_fragment(content) {
         return Err(UtilityError::new(
             UtilityErrorKind::InvalidArbitraryValue,
             family,
@@ -659,6 +673,22 @@ fn safe_arbitrary(content: &str, family: &str) -> Result<String, UtilityError> {
         ));
     }
     Ok(content.replace('_', " "))
+}
+
+fn safe_property(property: &str) -> bool {
+    !property.is_empty()
+        && property.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+fn unsafe_css_fragment(content: &str) -> bool {
+    let contains_style_close = content
+        .as_bytes()
+        .windows(b"</style".len())
+        .any(|window| window.eq_ignore_ascii_case(b"</style"));
+    content.chars().any(|character| character.is_control() || matches!(character, ';' | '{' | '}'))
+        || content.contains("/*")
+        || content.contains("*/")
+        || contains_style_close
 }
 
 fn negate(value: String) -> String {
@@ -782,6 +812,21 @@ mod tests {
     }
 
     #[test]
+    fn rejects_control_comment_and_style_termination_sequences() {
+        for candidate in
+            ["w-[1rem\u{0000}]", "w-[1rem\u{0009}]", "w-[1rem/*comment*/]", "w-[1rem</STYLE>]"]
+        {
+            let error = resolve(
+                &parse(candidate).expect("candidate structure is valid"),
+                &Theme::default(),
+                &UtilityRegistry::default(),
+            )
+            .expect_err("unsafe CSS value is rejected");
+            assert_eq!(error.kind(), UtilityErrorKind::InvalidArbitraryValue);
+        }
+    }
+
+    #[test]
     fn custom_static_definitions_extend_the_registry() {
         let mut registry = UtilityRegistry::new();
         registry.register(
@@ -796,6 +841,21 @@ mod tests {
         .expect("custom utility is registered");
 
         assert_eq!(resolved.declarations()[0].property(), "place-content");
+    }
+
+    #[test]
+    fn rejects_unsafe_custom_static_declarations() {
+        let mut registry = UtilityRegistry::new();
+        registry.register(
+            "unsafe",
+            UtilityDefinition::static_declaration("display; color", "block", 99),
+        );
+
+        let error =
+            resolve(&parse("unsafe").expect("candidate is valid"), &Theme::default(), &registry)
+                .expect_err("unsafe custom declaration is rejected");
+
+        assert_eq!(error.kind(), UtilityErrorKind::InvalidDeclaration);
     }
 
     #[test]

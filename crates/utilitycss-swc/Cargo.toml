@@ -1,0 +1,20 @@
+[package]
+name = "utilitycss-swc"
+description = "SWC AST-backed extraction for JavaScript, TypeScript, JSX, and TSX sources."
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+swc_common = "=26.0.0"
+swc_ecma_ast = "=29.0.0"
+swc_ecma_parser = { version = "=45.0.1", default-features = false, features = ["typescript"] }
+swc_ecma_visit = "=29.0.0"
+utilitycss-scanner = { path = "../utilitycss-scanner" }
+utilitycss-span = { path = "../utilitycss-span" }
+
+[dev-dependencies]
+proptest = "=1.11.0"
+
+[lints]
+workspace = true

@@ -107,13 +107,17 @@ See `roadmap/PHASE_5_ADAPTERS.md`.
 
 Goal: add optional AST-assisted extraction and extension points.
 
-Deliverables may include:
+Delivered in the current production-readiness increment:
 
 - SWC-assisted extractor,
-- framework-specific extractors,
-- plugin API,
-- IDE/LSP services,
-- compatibility presets.
+- Vue/Svelte/Astro framework-specific static extractors,
+- declarative utility/variant plugin descriptions,
+- IDE/LSP diagnostics, completion, and hover services,
+- explicitly scoped compatibility presets.
+
+Remaining release work is broader compatibility coverage, workspace-aware IDE configuration, and
+platform/package release verification. These MUST be accompanied by conformance fixtures before
+being advertised as stable.
 
 See `roadmap/PHASE_6_ECOSYSTEM.md`.
 

@@ -18,7 +18,9 @@ use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher}
 use utilitycss_compiler::{Compiler, CompilerConfig, SourceInput};
 use utilitycss_config::ConfigFile;
 use utilitycss_css_ir::CssSerializationMode;
+use utilitycss_extractor::{extract_for_framework, Framework};
 use utilitycss_span::SourceId;
+use utilitycss_swc::{extract as extract_swc, SourceKind as SwcSourceKind};
 use walkdir::WalkDir;
 
 fn main() {
@@ -34,6 +36,7 @@ enum CliError {
     Io { path: PathBuf, source: io::Error },
     Config(utilitycss_config::ConfigError),
     Compiler(utilitycss_compiler::CompilerError),
+    Extraction(String),
     Diagnostics,
 }
 
@@ -44,6 +47,7 @@ impl fmt::Display for CliError {
             Self::Io { path, source } => write!(formatter, "{}: {source}", path.display()),
             Self::Config(error) => error.fmt(formatter),
             Self::Compiler(error) => error.fmt(formatter),
+            Self::Extraction(message) => write!(formatter, "source extraction failed: {message}"),
             Self::Diagnostics => formatter.write_str("compilation failed with diagnostics"),
         }
     }
@@ -251,7 +255,11 @@ fn make_compiler(options: &Options) -> Result<Compiler, CliError> {
         .map_err(CliError::Config)?;
     let mode = options.mode.unwrap_or(file.serialization_mode());
     Ok(Compiler::new(
-        CompilerConfig::new().with_theme(file.theme().clone()).with_serialization_mode(mode),
+        CompilerConfig::new()
+            .with_theme(file.theme().clone())
+            .with_utility_registry(file.utilities().clone())
+            .with_variant_registry(file.variants().clone())
+            .with_serialization_mode(mode),
     ))
 }
 
@@ -259,11 +267,62 @@ fn update_file(compiler: &mut Compiler, path: &Path) -> Result<(), CliError> {
     let content = fs::read_to_string(path)
         .map_err(|source| CliError::Io { path: path.to_owned(), source })?;
     let source_id = SourceId::new(path.to_string_lossy().into_owned());
+    let candidates = extract_candidates(path, &content)?;
     compiler
-        .update_source(
+        .update_source_with_candidates(
             SourceInput::new(source_id, content).with_path(path.to_string_lossy().into_owned()),
+            candidates,
         )
         .map_err(CliError::Compiler)
+}
+
+fn extract_candidates(
+    path: &Path,
+    content: &str,
+) -> Result<Vec<utilitycss_compiler::CandidateInput>, CliError> {
+    let extension = path.extension().and_then(|extension| extension.to_str());
+    let candidates = match extension {
+        Some("js") | Some("mjs") | Some("cjs") => extract_swc(content, SwcSourceKind::JavaScript)
+            .map_err(|error| CliError::Extraction(error.to_string()))?
+            .into_iter()
+            .map(|candidate| (candidate.raw(), candidate.span()))
+            .collect::<Vec<_>>(),
+        Some("jsx") | Some("mjsx") | Some("cjsx") => extract_swc(content, SwcSourceKind::Jsx)
+            .map_err(|error| CliError::Extraction(error.to_string()))?
+            .into_iter()
+            .map(|candidate| (candidate.raw(), candidate.span()))
+            .collect::<Vec<_>>(),
+        Some("ts") | Some("mts") | Some("cts") => extract_swc(content, SwcSourceKind::TypeScript)
+            .map_err(|error| CliError::Extraction(error.to_string()))?
+            .into_iter()
+            .map(|candidate| (candidate.raw(), candidate.span()))
+            .collect::<Vec<_>>(),
+        Some("tsx") | Some("mtsx") | Some("ctsx") => extract_swc(content, SwcSourceKind::Tsx)
+            .map_err(|error| CliError::Extraction(error.to_string()))?
+            .into_iter()
+            .map(|candidate| (candidate.raw(), candidate.span()))
+            .collect::<Vec<_>>(),
+        Some("vue") => extract_for_framework(content, Framework::Vue)
+            .into_iter()
+            .map(|candidate| (candidate.raw(), candidate.span()))
+            .collect::<Vec<_>>(),
+        Some("svelte") => extract_for_framework(content, Framework::Svelte)
+            .into_iter()
+            .map(|candidate| (candidate.raw(), candidate.span()))
+            .collect::<Vec<_>>(),
+        Some("astro") => extract_for_framework(content, Framework::Astro)
+            .into_iter()
+            .map(|candidate| (candidate.raw(), candidate.span()))
+            .collect::<Vec<_>>(),
+        _ => extract_for_framework(content, Framework::Html)
+            .into_iter()
+            .map(|candidate| (candidate.raw(), candidate.span()))
+            .collect::<Vec<_>>(),
+    };
+    Ok(candidates
+        .into_iter()
+        .map(|(raw, span)| utilitycss_compiler::CandidateInput::new(raw, span))
+        .collect())
 }
 
 fn emit(compiler: &mut Compiler, options: &Options) -> Result<(), CliError> {

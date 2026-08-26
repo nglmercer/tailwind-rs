@@ -139,6 +139,71 @@ test("retransforms CSS on HMR updates and accepts query-string module IDs", asyn
   assert.deepEqual(transformed, [["src/app.css", ".button { @apply p-8; }", "src/app.css"]]);
 });
 
+test("reports CSS diagnostics during HMR and recovers after the edit is fixed", async () => {
+  const errors = [];
+  class CssNativeCompiler {
+    updateSource() {}
+    removeSource() {
+      return false;
+    }
+    transformStylesheet(id, content, path) {
+      assert.equal(id, "src/app.css");
+      assert.equal(path, "src/app.css");
+      if (content.includes("invalid")) {
+        return {
+          css: content,
+          diagnostics: [{
+            severity: "error",
+            code: "apply.unknown-utility",
+            message: "unknown utility `invalid`",
+            source: "src/app.css",
+            start: 17,
+            end: 24,
+            help: "remove the utility"
+          }]
+        };
+      }
+      return { css: content.replace("@apply p-8;", "padding: 2rem;"), diagnostics: [] };
+    }
+    build() {
+      return { css: "", diagnostics: [], stats: {
+        sourcesScanned: 0,
+        bytesScanned: 0,
+        candidatesFound: 0,
+        uniqueCandidates: 0,
+        candidatesParsed: 0,
+        cacheHits: 0,
+        rulesGenerated: 0,
+        rulesRemoved: 0
+      }};
+    }
+  }
+  const plugin = utilitycss({ native: CssNativeCompiler });
+  const server = {
+    moduleGraph: { getModuleById: async () => undefined, invalidateModule: () => {} },
+    config: { logger: { warn: () => {}, error: (message) => errors.push(message) } }
+  };
+  await assert.rejects(
+    () => plugin.handleHotUpdate({
+      file: "src/app.css",
+      event: { type: "update" },
+      modules: [],
+      read: async () => ".button { @apply invalid; }",
+      server
+    }),
+    /unknown utility `invalid`/
+  );
+  assert.match(errors[0], /apply\.unknown-utility/);
+
+  await plugin.handleHotUpdate({
+    file: "src/app.css",
+    event: { type: "update" },
+    modules: [],
+    read: async () => ".button { @apply p-8; }",
+    server
+  });
+});
+
 test("normalizes module IDs and removes deleted source state", async () => {
   const removed = [];
   class FakeNativeCompiler {

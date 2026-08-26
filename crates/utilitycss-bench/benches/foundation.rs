@@ -113,6 +113,20 @@ fn benchmark_compiler(iterations: u32) {
 }
 
 fn benchmark_stylesheet() {
+    let large_no_apply =
+        (0..10_000).map(|index| format!(".plain-{index} {{ color: red; }}")).collect::<String>();
+    let mut compiler = Compiler::new(CompilerConfig::new());
+    let started = Instant::now();
+    let output = transform_stylesheet(
+        &mut compiler,
+        StylesheetInput::new(SourceId::new("no-apply.css"), black_box(large_no_apply)),
+    );
+    println!(
+        "stylesheet no-apply fast path: 10,000 authored rules in {:?} (css-bytes={})",
+        started.elapsed(),
+        output.css().len()
+    );
+
     for count in [100_usize, 1_000, 10_000] {
         let source = (0..count)
             .map(|index| format!(".button-{index} {{ @apply flex p-4 hover:bg-red-500; }}"))
@@ -130,4 +144,19 @@ fn benchmark_stylesheet() {
             output.diagnostics().len()
         );
     }
+
+    let repeated = (0..10_000)
+        .map(|index| format!(".repeat-{index} {{ @apply flex p-4; }}"))
+        .collect::<String>();
+    let mut compiler = Compiler::new(CompilerConfig::new());
+    let started = Instant::now();
+    let output = transform_stylesheet(
+        &mut compiler,
+        StylesheetInput::new(SourceId::new("repeated.css"), black_box(repeated)),
+    );
+    println!(
+        "stylesheet repeated candidates: 10,000 directives in {:?} (css-bytes={})",
+        started.elapsed(),
+        output.css().len()
+    );
 }

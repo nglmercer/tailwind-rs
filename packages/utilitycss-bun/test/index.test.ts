@@ -155,6 +155,68 @@ test("rebuilds from the current graph without stale replacement or deleted-sourc
   }
 });
 
+test("retains unchanged modules during an incremental HMR graph rebuild", async () => {
+  const root = await makeProject({
+    "entry.ts": 'import "./a.ts"; import "./b.ts"; import "utilitycss";',
+    "a.ts": 'export const classes = "p-4";',
+    "b.ts": 'export const classes = "flex";'
+  });
+  const plugin = utilitycss({ native: FakeNativeCompiler });
+  try {
+    const first = await build(root, plugin, "entry.ts");
+    assert.match(first.css, /\.p-4\s*\{/);
+    assert.match(first.css, /\.flex\s*\{/);
+
+    await writeFile(join(root, "a.ts"), 'export const classes = "p-8";');
+    const second = await build(root, plugin, "entry.ts");
+    assert.match(second.css, /\.p-8\s*\{/);
+    assert.match(second.css, /\.flex\s*\{/);
+    assert.doesNotMatch(second.css, /\.p-4\s*\{/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("rebuilds an HTML-only edit through the live source graph", async () => {
+  const root = await makeProject({
+    "index.html": '<link rel="stylesheet" href="utilitycss"><main class="p-4"></main>'
+  });
+  const plugin = utilitycss({ native: FakeNativeCompiler });
+  try {
+    const first = await build(root, plugin, "index.html");
+    assert.match(first.css, /\.p-4\s*\{/);
+
+    await writeFile(
+      join(root, "index.html"),
+      '<link rel="stylesheet" href="utilitycss"><main class="p-8"></main>'
+    );
+    const second = await build(root, plugin, "index.html");
+    assert.match(second.css, /\.p-8\s*\{/);
+    assert.doesNotMatch(second.css, /\.p-4\s*\{/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("rebuilds a TSX-only edit while preserving the imported graph", async () => {
+  const root = await makeProject({
+    "entry.ts": 'import "./Button.tsx"; import "utilitycss";',
+    "Button.tsx": 'export const Button = () => <button className="p-4" />;'
+  });
+  const plugin = utilitycss({ native: FakeNativeCompiler });
+  try {
+    const first = await build(root, plugin, "entry.ts");
+    assert.match(first.css, /\.p-4\s*\{/);
+
+    await writeFile(join(root, "Button.tsx"), 'export const Button = () => <button className="p-8" />;');
+    const second = await build(root, plugin, "entry.ts");
+    assert.match(second.css, /\.p-8\s*\{/);
+    assert.doesNotMatch(second.css, /\.p-4\s*\{/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("emits byte-identical CSS for the same graph twice", async () => {
   const root = await makeProject({
     "entry.ts": 'import "./source.ts"; import "utilitycss";',

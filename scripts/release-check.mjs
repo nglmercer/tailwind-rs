@@ -132,7 +132,7 @@ run("Rust Clippy", "cargo", ["clippy", "--workspace", "--all-targets", "--all-fe
 run("Rust workspace tests", "cargo", ["test", "--workspace", "--all-features"]);
 run("Compiler conformance", "cargo", ["test", "-p", "utilitycss-compiler", "--test", "conformance"]);
 run("Stylesheet Rust tests", "cargo", ["test", "-p", "utilitycss-stylesheet"]);
-run("@apply conformance", "cargo", ["test", "-p", "utilitycss-stylesheet", "--lib"]);
+run("@apply conformance", "cargo", ["test", "-p", "utilitycss-stylesheet", "--test", "apply_fixtures"]);
 run("Rust benchmark", "cargo", ["bench", "-p", "utilitycss-bench"]);
 // Workspace crates intentionally share the pre-1.0 version while they are
 // unpublished. Cargo's normal package verification resolves path dependencies

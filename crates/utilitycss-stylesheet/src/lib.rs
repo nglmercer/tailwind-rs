@@ -216,13 +216,15 @@ fn parse_nodes(
                 cursor = item_end;
             }
             Boundary::Block { open, close } => {
-                let prelude =
-                    trim_leading_css_trivia(&transformer.content[cursor..open]).trim().to_owned();
+                let (leading, prelude) = split_block_prelude(&transformer.content[cursor..open]);
                 if prelude.is_empty() {
                     return Err(ParseFailure::new(
                         open,
                         "CSS block is missing a selector or at-rule",
                     ));
+                }
+                if !leading.trim().is_empty() {
+                    nodes.push(Node::Statement(leading));
                 }
                 let (body, generated) = if prelude.starts_with('@') {
                     if is_declaration_at_rule(&prelude) {
@@ -244,7 +246,14 @@ fn parse_nodes(
                                 transformer,
                                 open + 1,
                                 close,
-                                ScopeKind::Root,
+                                if is_keyframes_at_rule(&prelude) {
+                                    ScopeKind::DeclarationBlock {
+                                        allow_apply: false,
+                                        nested_style: true,
+                                    }
+                                } else {
+                                    ScopeKind::Root
+                                },
                             )?),
                             Vec::new(),
                         )
@@ -263,7 +272,17 @@ fn parse_nodes(
             }
             Boundary::End => {
                 if cursor < end {
-                    nodes.push(Node::Statement(transformer.content[cursor..end].to_owned()));
+                    let raw = &transformer.content[cursor..end];
+                    if is_apply_statement(raw) {
+                        transformer.diagnostics.push(stylesheet_diagnostic(
+                            "apply.invalid-context",
+                            "@apply is only supported directly inside a CSS style rule",
+                            transformer.source.clone(),
+                            span_for_range(cursor, end),
+                            Some("move @apply into a non-nested style rule and terminate it with `;`"),
+                        ));
+                    }
+                    nodes.push(Node::Statement(raw.to_owned()));
                 }
                 cursor = end;
             }
@@ -289,10 +308,12 @@ fn parse_items(
                 cursor = item_end;
             }
             Boundary::Block { open, close } => {
-                let prelude =
-                    trim_leading_css_trivia(&transformer.content[cursor..open]).trim().to_owned();
+                let (leading, prelude) = split_block_prelude(&transformer.content[cursor..open]);
                 if prelude.is_empty() {
                     return Err(ParseFailure::new(open, "nested CSS block is missing a prelude"));
+                }
+                if !leading.trim().is_empty() {
+                    items.push(BodyItem::Statement(leading));
                 }
                 // Nested style composition requires selector expansion across the nesting tree.
                 // Parse and preserve the block, but keep explicit @apply diagnostics strict.
@@ -524,17 +545,33 @@ fn find_apply_keyword(raw: &str) -> Option<usize> {
     }
 }
 
-fn trim_leading_css_trivia(mut input: &str) -> &str {
+fn trim_leading_css_trivia(input: &str) -> &str {
+    &input[leading_css_trivia_end(input)..]
+}
+
+fn leading_css_trivia_end(input: &str) -> usize {
+    let mut cursor = 0;
     loop {
-        input = input.trim_start();
-        if !input.starts_with("/*") {
-            return input;
+        while cursor < input.len() {
+            let character = input[cursor..].chars().next().expect("cursor is a UTF-8 boundary");
+            if !character.is_whitespace() {
+                break;
+            }
+            cursor += character.len_utf8();
         }
-        let Some(end) = input[2..].find("*/") else {
-            return input;
+        if !input[cursor..].starts_with("/*") {
+            return cursor;
+        }
+        let Some(end) = input[cursor + 2..].find("*/") else {
+            return cursor;
         };
-        input = &input[end + 4..];
+        cursor += end + 4;
     }
+}
+
+fn split_block_prelude(raw: &str) -> (String, String) {
+    let leading_end = leading_css_trivia_end(raw);
+    (raw[..leading_end].to_owned(), raw[leading_end..].trim().to_owned())
 }
 
 fn is_apply_statement(raw: &str) -> bool {
@@ -683,6 +720,16 @@ fn is_declaration_at_rule(prelude: &str) -> bool {
     matches!(name.as_str(), "font-face" | "page" | "property" | "counter-style" | "viewport")
 }
 
+fn is_keyframes_at_rule(prelude: &str) -> bool {
+    let name = prelude
+        .trim_start_matches('@')
+        .split(|character: char| character.is_whitespace() || character == '(')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    matches!(name.as_str(), "keyframes" | "-webkit-keyframes" | "-moz-keyframes")
+}
+
 fn validate_css_tokens(content: &str) -> Result<(), ParseFailure> {
     let mut input = ParserInput::new(content);
     let mut parser = Parser::new(&mut input);
@@ -707,6 +754,8 @@ fn transform_style_body(
             Boundary::Semicolon { end: item_end } => {
                 let raw = &transformer.content[cursor..item_end];
                 if is_apply_statement(raw) && allow_apply {
+                    let leading_end = leading_css_trivia_end(raw);
+                    let leading = &raw[..leading_end];
                     let parsed = parse_apply_candidates(raw, cursor)?;
                     if parsed.candidates.is_empty() {
                         transformer.diagnostics.push(stylesheet_diagnostic(
@@ -718,6 +767,9 @@ fn transform_style_body(
                         ));
                         items.push(BodyItem::Statement(raw.to_owned()));
                     } else {
+                        if !leading.trim().is_empty() {
+                            items.push(BodyItem::Statement(leading.to_owned()));
+                        }
                         let output = transformer.compiler.compose(CompositionInput {
                             source: &transformer.source,
                             selector,
@@ -753,8 +805,13 @@ fn transform_style_body(
                 cursor = item_end;
             }
             Boundary::Block { open, close } => {
-                let prelude =
-                    trim_leading_css_trivia(&transformer.content[cursor..open]).trim().to_owned();
+                let (leading, prelude) = split_block_prelude(&transformer.content[cursor..open]);
+                if prelude.is_empty() {
+                    return Err(ParseFailure::new(open, "nested CSS block is missing a prelude"));
+                }
+                if !leading.trim().is_empty() {
+                    items.push(BodyItem::Statement(leading));
+                }
                 let nested = if prelude.starts_with('@') && !is_declaration_at_rule(&prelude) {
                     Node::Block {
                         prelude,
@@ -906,12 +963,21 @@ fn serialize_items(
 }
 
 fn canonical_statement(raw: &str, mode: CssSerializationMode, indent: usize) -> String {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
+    let leading_end = leading_css_trivia_end(raw);
+    let leading = raw[..leading_end].trim();
+    let trimmed = raw[leading_end..].trim();
+    if leading.is_empty() && trimmed.is_empty() {
         return String::new();
     }
+    if trimmed.is_empty() {
+        return if mode == CssSerializationMode::Pretty {
+            indent_block(leading, indent)
+        } else {
+            leading.to_owned()
+        };
+    }
     let without_semicolon = trimmed.strip_suffix(';').unwrap_or(trimmed).trim_end();
-    let result = if without_semicolon.starts_with('@') {
+    let statement = if without_semicolon.starts_with('@') {
         format!("{without_semicolon};")
     } else if let Some(colon) = find_top_level_colon(without_semicolon) {
         let property = without_semicolon[..colon].trim();
@@ -924,15 +990,31 @@ fn canonical_statement(raw: &str, mode: CssSerializationMode, indent: usize) -> 
     } else {
         format!("{without_semicolon};")
     };
+    let result = if leading.is_empty() {
+        statement
+    } else if mode == CssSerializationMode::Pretty {
+        format!(
+            "{}\n{}{}",
+            indent_block(leading, indent),
+            indentation(indent),
+            pretty_statement(&statement)
+        )
+    } else {
+        format!("{leading}{statement}")
+    };
     if mode == CssSerializationMode::Pretty {
-        format!("{}{}", indentation(indent), pretty_statement(&result))
+        if leading.is_empty() {
+            format!("{}{}", indentation(indent), pretty_statement(&result))
+        } else {
+            result
+        }
     } else {
         result
     }
 }
 
 fn pretty_statement(statement: &str) -> String {
-    if let Some(colon) = statement.find(':') {
+    if let Some(colon) = find_top_level_colon(statement) {
         format!("{}: {}", &statement[..colon], statement[colon + 1..].trim_start())
     } else {
         statement.to_owned()
@@ -1144,6 +1226,22 @@ mod tests {
     }
 
     #[test]
+    fn preserves_comments_around_authored_declarations_and_apply() {
+        let output = transform(
+            "/* top */\n.button { /* before */ color: red; /* apply */ @apply p-4; /* after */ display: block; }",
+        );
+
+        assert!(output.diagnostics().is_empty());
+        assert!(output.css().contains("/* top */"));
+        assert!(output.css().contains("/* before */"));
+        assert!(output.css().contains("color:red;"));
+        assert!(output.css().contains("/* apply */"));
+        assert!(output.css().contains("padding:1rem;"));
+        assert!(output.css().contains("/* after */"));
+        assert!(output.css().contains("display:block;"));
+    }
+
+    #[test]
     fn malformed_apply_values_report_diagnostics_without_panicking() {
         let output = transform(".card { @apply w-[calc(100% - 2rem); }");
 
@@ -1162,6 +1260,23 @@ mod tests {
         assert_eq!(output.diagnostics().len(), 2);
         assert!(output.css().contains("@apply p-4;"));
         assert!(output.css().contains("@apply p-8;"));
+    }
+
+    #[test]
+    fn rejects_apply_inside_keyframes_without_reinterpreting_the_block() {
+        let output = transform("@keyframes spin { from { @apply p-4; } }");
+
+        assert_eq!(output.diagnostics().len(), 1);
+        assert_eq!(output.diagnostics()[0].code().as_str(), "apply.unsupported");
+        assert!(output.css().contains("@apply p-4;"));
+    }
+
+    #[test]
+    fn diagnoses_root_apply_without_a_semicolon() {
+        let output = transform("@apply p-4");
+
+        assert_eq!(output.diagnostics().len(), 1);
+        assert_eq!(output.diagnostics()[0].code().as_str(), "apply.invalid-context");
     }
 
     proptest! {

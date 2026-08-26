@@ -6,7 +6,8 @@ switch between register and login flows, and inspect the compile story shown in 
 
 The Rust compiler is used through `@utilitycss/node` and the `@utilitycss/bun` plugin. Bun discovers
 the HTML and TSX module graph, loads the virtual `utilitycss` stylesheet, and regenerates it during
-hot rebuilds. Development does not write a CSS file to disk and does not start a second watcher.
+hot rebuilds. Authored `src/app.css` is transformed through the same native `@apply` stylesheet
+API, while development does not write a generated CSS file to disk or start a second watcher.
 
 The example imports the built repository packages directly, so it is intended to be run from a
 checkout of this repository rather than from the npm registry.
@@ -61,8 +62,10 @@ plugins = ["@utilitycss/bun"]
 
 ## How the example is structured
 
-- `src/index.html` is the Bun HTML entry and links both `./style.css` and the virtual stylesheet
+- `src/index.html` is the Bun HTML entry and links `./style.css`, authored `./app.css`, and the virtual stylesheet
   with `<link rel="stylesheet" href="utilitycss" />`.
+- `src/app.css` demonstrates local `@apply` composition, including a hover rule and a responsive
+  `md:` variant.
 - `src/style.css` contains the app's semantic component styling and responsive presentation rules.
 - `src/app.tsx` owns only application state and composition; the Preact UI is split into focused
   files under `src/components/`.
@@ -104,7 +107,8 @@ The server exposes these same-origin endpoints:
 ## What it demonstrates
 
 - Preact components and hooks bundled from TSX through Bun;
-- semantic CSS in `style.css` plus reusable utility recipes for repeated layout patterns;
+- semantic CSS in `style.css`, authored `@apply` composition in `app.css`, plus reusable utility
+  recipes for repeated layout patterns;
 - virtual CSS generated from HTML and TSX module-graph sources;
 - spacing, sizing, colors, radius, flexbox, and grid utilities;
 - arbitrary values such as `max-w-[42rem]` and `hover:`/responsive `md:` variants;
@@ -116,8 +120,7 @@ The production `dist/` output and local `node_modules/` are ignored by this exam
 
 ## Styling recommendation
 
-This example deliberately does not add a partial `@apply` implementation. The recommended split is
-to keep product-specific visual design in `style.css` and use `styles.ts` for small, static utility
-recipes that should remain visible to the compiler. A future `@apply` feature belongs in the
-compiler's CSS-entry pipeline and MUST define parsing, cascade/layer behavior, diagnostics, and
-conformance tests before it is presented as Tailwind-compatible behavior.
+Keep product-specific visual design in `style.css`, use `app.css` for local `@apply` composition,
+and use `styles.ts` for small, static utility recipes that should remain visible to the compiler.
+The `@apply` implementation is utilitycss-compatible composition backed by the Rust registry; it
+MUST NOT be read as a claim of complete Tailwind compatibility.

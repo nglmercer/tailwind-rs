@@ -85,6 +85,9 @@ CSS Modules are transformed using the selector text supplied by the CSS module. 
 utility or custom-class resolution is not provided; projects requiring that behavior should keep
 composition local or wait for a future explicit registry/reference design.
 
+`@reference` is not required or interpreted by this release. Shared theme, utility, and variant
+references are a separate build-context feature and MUST NOT be assumed to work across files.
+
 ## APIs
 
 The native binding exposes:

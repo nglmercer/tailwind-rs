@@ -23,7 +23,15 @@ export interface ViteHotUpdateContext {
   readonly modules: readonly ViteModule[];
   readonly read: () => Promise<string>;
   readonly event?: { readonly type: "create" | "update" | "delete" };
-  readonly server: { readonly moduleGraph: ViteModuleGraph };
+  readonly server: {
+    readonly moduleGraph: ViteModuleGraph;
+    readonly config?: {
+      readonly logger?: {
+        warn(message: string): void;
+        error(message: string): void;
+      };
+    };
+  };
 }
 
 /** The Rollup watcher change notification used for source deletion. */
@@ -121,7 +129,8 @@ export function utilitycss(options: ViteOptions = {}): UtilityCssVitePlugin {
       const normalizedId = normalizeModuleId(context.file);
       if (isCss(normalizedId)) {
         if (context.event?.type !== "delete") {
-          compiler.transformStylesheet(normalizedId, await context.read(), normalizedId);
+          const result = compiler.transformStylesheet(normalizedId, await context.read(), normalizedId);
+          reportHotUpdateDiagnostics(result.diagnostics, context);
         }
         return context.modules;
       }
@@ -165,4 +174,30 @@ function normalizeModuleId(id: string): string {
   }
   const query = normalized.search(/[?#]/);
   return query === -1 ? normalized : normalized.slice(0, query);
+}
+
+function reportHotUpdateDiagnostics(
+  diagnostics: readonly Diagnostic[],
+  context: ViteHotUpdateContext
+): void {
+  for (const diagnostic of diagnostics) {
+    const message = formatDiagnostic(diagnostic);
+    if (diagnostic.severity === "error" || diagnostic.severity === undefined) {
+      context.server.config?.logger?.error(message);
+      throw new Error(message);
+    }
+    if (context.server.config?.logger) {
+      context.server.config.logger.warn(message);
+    } else {
+      console.warn(message);
+    }
+  }
+}
+
+function formatDiagnostic(diagnostic: Diagnostic): string {
+  const location = diagnostic.source ?? "";
+  const span = diagnostic.start === undefined
+    ? ""
+    : `${location ? ":" : ""}${diagnostic.start}-${diagnostic.end ?? diagnostic.start}`;
+  return `${location}${span}: ${diagnostic.message} [${diagnostic.code}]${diagnostic.help ? `; ${diagnostic.help}` : ""}`;
 }

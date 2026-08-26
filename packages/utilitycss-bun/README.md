@@ -32,9 +32,19 @@ Then reference the virtual stylesheet from HTML:
 <link rel="stylesheet" href="utilitycss" />
 ```
 
-The adapter creates a fresh compiler for each Bun build cycle. It does not start a second
-filesystem watcher or write a development stylesheet to disk, so source deletion and HMR rebuilds
-reflect exactly the current Bun module graph.
+The adapter rebuilds a compiler from a persistent normalized-module snapshot for each Bun build
+cycle. This retains unchanged modules when Bun omits them from an incremental callback while its
+dependency graph tracking removes deleted modules. Imported `.css` files are transformed through
+the same native `transformStylesheet` API used by Node and Vite.
+
+For fullstack development, the application server should explicitly enable Bun frontend HMR:
+
+```ts
+Bun.serve({
+  development: { hmr: true, console: true },
+  routes: { "/": homepage }
+});
+```
 
 The default export is a zero-options plugin object for Bun's `bunfig.toml` loader; use the named
 `utilitycss(options?)` export when passing options to `Bun.build()`.

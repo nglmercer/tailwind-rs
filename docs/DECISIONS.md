@@ -86,6 +86,27 @@ Decision:
 
 Compiler APIs and indexes are designed for updates/removals, not only one-shot builds.
 
+## ADR-0008 — Stylesheet parsing is a separate token-aware layer
+
+Status: accepted.
+
+Decision:
+
+`utilitycss-stylesheet` owns CSS stylesheet parsing, source spans, `@apply` discovery, and
+authored-CSS serialization. It uses the standards-oriented `cssparser` tokenizer for CSS token
+validation and a small scope AST for deterministic transformation. The stylesheet crate consumes
+the compiler facade; the compiler does not depend on the stylesheet layer.
+
+Reason:
+
+- `utilitycss-css-ir` remains a semantic output representation rather than a general-purpose CSS
+  parser;
+- comments, strings, nested functions, brackets, and blocks cannot be handled safely by a regular
+  expression;
+- the small AST preserves unrelated authored CSS while allowing selector-aware composition;
+- `cssparser` is runtime-independent and builds for native and WASM targets;
+- its MPL-2.0 dependency license is explicitly allowed by the repository dependency policy.
+
 ## Open decisions
 
 Topics requiring future ADR/RFC:

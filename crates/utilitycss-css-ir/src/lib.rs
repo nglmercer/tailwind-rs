@@ -176,6 +176,12 @@ impl CssRule {
         Self { order, kind: self.kind.clone() }
     }
 
+    /// Returns a copy with every declaration marked important or unimportant.
+    #[must_use]
+    pub fn with_important(&self, important: bool) -> Self {
+        Self { order: self.order, kind: map_important(&self.kind, important) }
+    }
+
     /// Maps every nested style selector while preserving the rule structure.
     #[must_use]
     pub fn map_selectors<F>(&self, mut mapper: F) -> Self
@@ -241,6 +247,24 @@ where
                     kind: map_rule_kind(&child.kind, mapper),
                 })
                 .collect(),
+        },
+    }
+}
+
+fn map_important(kind: &RuleKind, important: bool) -> RuleKind {
+    match kind {
+        RuleKind::Style { selector, declarations } => RuleKind::Style {
+            selector: selector.clone(),
+            declarations: declarations
+                .iter()
+                .cloned()
+                .map(|declaration| declaration.with_important(important))
+                .collect(),
+        },
+        RuleKind::AtRule { name, prelude, children } => RuleKind::AtRule {
+            name: name.clone(),
+            prelude: prelude.clone(),
+            children: children.iter().map(|child| child.with_important(important)).collect(),
         },
     }
 }

@@ -12,6 +12,8 @@ export declare class Compiler {
   removeSource(id: string): boolean
   /** Builds the current sources and returns CSS, diagnostics, and counters. */
   build(): JsBuildResult
+  /** Transforms authored CSS and resolves explicit `@apply` directives. */
+  transformStylesheet(id: string, content: string, path?: string | undefined | null): JsStylesheetResult
 }
 
 /** A compiler build result returned to JavaScript. */
@@ -70,4 +72,12 @@ export interface JsStats {
   rulesGenerated: number
   /** Number of rules removed from active references. */
   rulesRemoved: number
+}
+
+/** A stylesheet transformation result returned across the N-API boundary. */
+export interface JsStylesheetResult {
+  /** Transformed authored CSS. */
+  css: string
+  /** Structured stylesheet and composition diagnostics. */
+  diagnostics: Array<JsDiagnostic>
 }

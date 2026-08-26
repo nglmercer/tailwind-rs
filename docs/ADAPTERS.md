@@ -75,13 +75,16 @@ HTML references the virtual stylesheet without a generated development file:
 
 The plugin MUST:
 
-- create one compiler for each Bun build cycle;
+- rebuild compiler state from a persistent normalized-module source snapshot for each Bun build
+  cycle, because Bun may omit unchanged modules during incremental rebuilds;
 - collect `.html`, `.htm`, JavaScript, TypeScript, JSX/TSX, Vue, Svelte, and Astro modules through
   Bun `onLoad` hooks;
 - defer the virtual CSS load until source modules have been loaded;
 - normalize file URLs, `/@fs/` IDs, separators, queries, and real paths;
 - fail builds for compiler errors and expose warnings with their structured source information;
 - regenerate CSS from the current module graph so deleted modules cannot leave stale utilities;
+- transform imported `.css` files through the native stylesheet API and report `@apply` diagnostics;
+- rely on `Bun.serve({ development: { hmr: true } })` for frontend graph/HMR behavior in development;
 - avoid writing development CSS to disk and avoid an adapter-owned watcher.
 
 The default virtual specifier is `utilitycss`; callers MAY override it with `specifier`. The package
@@ -90,9 +93,8 @@ export, which lets Bun load it directly from `bunfig.toml`.
 
 The repository example in [`examples/bun`](../examples/bun/) uses Preact for its browser UI. Preact
 is an application dependency, not part of the Bun adapter: `@utilitycss/node` remains the generic
-compiler lifecycle API, while `@utilitycss/bun` supplies Bun bundler/fullstack/HMR hooks.
-The example keeps semantic presentation rules in `style.css` and uses static `cn(...)` recipes for
-repeated utility combinations; it does not claim to implement Tailwind's `@apply` directive.
+compiler lifecycle API, while `@utilitycss/bun` supplies Bun bundler/fullstack/HMR hooks. The
+example demonstrates authored `@apply` CSS alongside generated utility CSS.
 
 ## Deno
 

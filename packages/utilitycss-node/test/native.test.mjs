@@ -24,6 +24,21 @@ test("native adapter uses SWC extraction for TSX", { skip: !NativeCompiler }, as
   assert.equal(result.diagnostics.length, 0);
 });
 
+test("native adapter transforms authored @apply CSS", { skip: !NativeCompiler }, async () => {
+  const { createCompiler } = await import("../dist/index.js");
+  const compiler = createCompiler({ native: NativeCompiler });
+  const result = compiler.transformStylesheet(
+    "src/app.css",
+    ".button { @apply flex p-4 hover:bg-red-500 md:p-8; }",
+    "src/app.css"
+  );
+
+  assert.match(result.css, /\.button\{display:flex;padding:1rem;\}/);
+  assert.match(result.css, /\.button:hover\{background-color:#ef4444;\}/);
+  assert.match(result.css, /@media \(min-width: 768px\)\{\.button\{padding:2rem;\}\}/);
+  assert.equal(result.diagnostics.length, 0);
+});
+
 test("requests host extraction when candidates are not supplied", () => {
   const calls = [];
   class ExtractingCompiler {

@@ -1,4 +1,10 @@
-import { createCompiler, type Compiler, type CompilerOptions } from "@utilitycss/node";
+import {
+  createCompiler,
+  type Compiler,
+  type CompilerOptions,
+  type Diagnostic,
+  type StylesheetResult
+} from "@utilitycss/node";
 
 /** Minimal Vite module shape needed for virtual CSS invalidation. */
 export interface ViteModule {
@@ -31,12 +37,18 @@ export interface VitePluginContext {
   error(message: string): never;
 }
 
+/** Result returned by Vite's CSS transform hook. */
+export interface ViteTransformResult {
+  readonly code: string;
+  readonly map: null;
+}
+
 /** The subset of the Vite plugin contract implemented here. */
 export interface UtilityCssVitePlugin {
   readonly name: "utilitycss";
   resolveId(id: string): string | undefined;
   load(id: string): string | undefined;
-  transform(this: VitePluginContext, code: string, id: string): Promise<null>;
+  transform(this: VitePluginContext, code: string, id: string): Promise<ViteTransformResult | null>;
   handleHotUpdate(context: ViteHotUpdateContext): Promise<readonly ViteModule[]>;
   watchChange(id: string, change: ViteWatchChange): void;
 }
@@ -54,6 +66,8 @@ export function utilitycss(options: ViteOptions = {}): UtilityCssVitePlugin {
   const resolvedVirtualId = `\0${virtualModuleId}`;
   const include = options.include ?? [/\.(?:html|astro|(?:m|c)?jsx?|(?:m|c)?tsx?|vue|svelte)$/];
 
+  const isCss = (id: string): boolean => /\.css(?:$|[?#])/i.test(id);
+
   const shouldInclude = (id: string): boolean => {
     const normalized = normalizeModuleId(id);
     return !normalized.startsWith("\0") && include.some((pattern) => {
@@ -62,11 +76,14 @@ export function utilitycss(options: ViteOptions = {}): UtilityCssVitePlugin {
     });
   };
 
-  const reportDiagnostics = (context: VitePluginContext | undefined): void => {
+  const reportDiagnostics = (
+    diagnostics: readonly Diagnostic[],
+    context: VitePluginContext | undefined
+  ): void => {
     if (!context) {
       return;
     }
-    for (const diagnostic of compiler.build().diagnostics) {
+    for (const diagnostic of diagnostics) {
       const location = diagnostic.source ?? "";
       const span = diagnostic.start === undefined ? "" : `${diagnostic.start}-${diagnostic.end ?? diagnostic.start}`;
       const suffix = span ? `${location ? ":" : ""}${span}` : "";
@@ -87,16 +104,27 @@ export function utilitycss(options: ViteOptions = {}): UtilityCssVitePlugin {
     load(id: string): string | undefined {
       return id === resolvedVirtualId ? compiler.build().css : undefined;
     },
-    async transform(this: VitePluginContext, code: string, id: string): Promise<null> {
+    async transform(this: VitePluginContext, code: string, id: string): Promise<ViteTransformResult | null> {
       const normalizedId = normalizeModuleId(id);
+      if (isCss(normalizedId)) {
+        const result: StylesheetResult = compiler.transformStylesheet(normalizedId, code, normalizedId);
+        reportDiagnostics(result.diagnostics, this);
+        return { code: result.css, map: null };
+      }
       if (shouldInclude(normalizedId)) {
         compiler.updateSource(normalizedId, code, normalizedId);
-        reportDiagnostics(this);
+        reportDiagnostics(compiler.build().diagnostics, this);
       }
       return null;
     },
     async handleHotUpdate(context: ViteHotUpdateContext): Promise<readonly ViteModule[]> {
       const normalizedId = normalizeModuleId(context.file);
+      if (isCss(normalizedId)) {
+        if (context.event?.type !== "delete") {
+          compiler.transformStylesheet(normalizedId, await context.read(), normalizedId);
+        }
+        return context.modules;
+      }
       if (shouldInclude(normalizedId)) {
         if (context.event?.type === "delete") {
           compiler.removeSource(normalizedId);

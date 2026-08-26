@@ -20,6 +20,7 @@ use utilitycss_config::ConfigFile;
 use utilitycss_css_ir::CssSerializationMode;
 use utilitycss_extractor::{extract_for_framework, Framework};
 use utilitycss_span::SourceId;
+use utilitycss_stylesheet::{transform_stylesheet, StylesheetInput};
 use utilitycss_swc::{extract as extract_swc, SourceKind as SwcSourceKind};
 use walkdir::WalkDir;
 
@@ -58,6 +59,7 @@ impl Error for CliError {}
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct Options {
     inputs: Vec<PathBuf>,
+    stylesheet_inputs: Vec<PathBuf>,
     output: Option<PathBuf>,
     mode: Option<CssSerializationMode>,
     config: Option<PathBuf>,
@@ -87,6 +89,9 @@ struct CommonArgs {
     /// Add an input file or directory.
     #[arg(short = 'i', long = "input", value_name = "PATH")]
     input_flags: Vec<PathBuf>,
+    /// Add an authored CSS stylesheet to transform with @apply.
+    #[arg(long = "stylesheet", value_name = "PATH")]
+    stylesheet_flags: Vec<PathBuf>,
     /// Write CSS to a file instead of stdout.
     #[arg(short, long, value_name = "PATH")]
     output: Option<PathBuf>,
@@ -156,8 +161,8 @@ fn parse_options(arguments: Vec<String>, watch: bool) -> Result<Options, CliErro
     };
     let mut inputs = common.positional_inputs;
     inputs.extend(common.input_flags);
-    if inputs.is_empty() {
-        return Err(usage("at least one input file or directory is required"));
+    if inputs.is_empty() && common.stylesheet_flags.is_empty() {
+        return Err(usage("at least one source input or --stylesheet path is required"));
     }
     let mode = if common.pretty {
         Some(CssSerializationMode::Pretty)
@@ -168,6 +173,7 @@ fn parse_options(arguments: Vec<String>, watch: bool) -> Result<Options, CliErro
     };
     Ok(Options {
         inputs,
+        stylesheet_inputs: common.stylesheet_flags,
         output: common.output,
         mode,
         config: common.config,
@@ -182,7 +188,9 @@ fn run_build(options: &Options) -> Result<(), CliError> {
     let mut compiler = make_compiler(options)?;
     let files = collect_files(&options.inputs, options.output.as_deref())?;
     for path in files {
-        update_file(&mut compiler, &path)?;
+        if !is_stylesheet(&path) {
+            update_file(&mut compiler, &path)?;
+        }
     }
     emit(&mut compiler, options)
 }
@@ -204,7 +212,7 @@ fn run_watch(options: Options) -> Result<(), CliError> {
         NotifyConfig::default().with_poll_interval(options.interval),
     )
     .map_err(|error| CliError::Usage(format!("could not start file watcher: {error}")))?;
-    for input in &options.inputs {
+    for input in options.inputs.iter().chain(options.stylesheet_inputs.iter()) {
         let mode =
             if input.is_dir() { RecursiveMode::Recursive } else { RecursiveMode::NonRecursive };
         watcher.watch(input, mode).map_err(|error| CliError::Io {
@@ -251,9 +259,15 @@ fn refresh_sources(
 ) -> Result<(), CliError> {
     let files = collect_files(inputs, output)?;
     for path in &files {
-        update_file(compiler, path)?;
+        if !is_stylesheet(path) {
+            update_file(compiler, path)?;
+        }
     }
-    let current = files.into_iter().map(|path| (path, ())).collect::<BTreeMap<_, _>>();
+    let current = files
+        .into_iter()
+        .filter(|path| !is_stylesheet(path))
+        .map(|path| (path, ()))
+        .collect::<BTreeMap<_, _>>();
     let removed =
         known.keys().filter(|path| !current.contains_key(*path)).cloned().collect::<Vec<_>>();
     for path in removed {
@@ -279,6 +293,10 @@ fn apply_watch_event(
         let is_output = output_key.as_ref().is_some_and(|output| output == &key);
         let is_file = path.is_file();
         let is_supported = is_supported_source(path);
+
+        if is_stylesheet(path) {
+            continue;
+        }
 
         if is_output || !is_supported || !is_file {
             let removed = known
@@ -384,17 +402,27 @@ fn extract_candidates(
 
 fn emit(compiler: &mut Compiler, options: &Options) -> Result<(), CliError> {
     let result = compiler.build();
+    let stylesheet = transform_authored_stylesheets(compiler, options)?;
+    let mode = compiler.config().serialization_mode();
+    let separator = if mode == CssSerializationMode::Pretty { "\n" } else { "" };
+    let css = if stylesheet.css.is_empty() {
+        result.css().to_owned()
+    } else if result.css().is_empty() {
+        stylesheet.css.clone()
+    } else {
+        format!("{}{separator}{}", stylesheet.css, result.css())
+    };
     if let Some(path) = &options.output {
-        fs::write(path, result.css())
+        fs::write(path, css.as_bytes())
             .map_err(|source| CliError::Io { path: path.clone(), source })?;
     } else {
         let mut stdout = io::stdout().lock();
         stdout
-            .write_all(result.css().as_bytes())
+            .write_all(css.as_bytes())
             .and_then(|_| stdout.write_all(b"\n"))
             .map_err(|source| CliError::Io { path: PathBuf::from("<stdout>"), source })?;
     }
-    for diagnostic in result.diagnostics().iter() {
+    for diagnostic in result.diagnostics().iter().chain(stylesheet.diagnostics.iter()) {
         let source = diagnostic.source().map_or_else(|| "<source>".to_owned(), ToString::to_string);
         let span = diagnostic
             .span()
@@ -418,11 +446,46 @@ fn emit(compiler: &mut Compiler, options: &Options) -> Result<(), CliError> {
             stats.rules_removed(),
         );
     }
-    if result.diagnostics().is_empty() {
+    if result.diagnostics().is_empty() && stylesheet.diagnostics.is_empty() {
         Ok(())
     } else {
         Err(CliError::Diagnostics)
     }
+}
+
+struct AuthoredStylesheetOutput {
+    css: String,
+    diagnostics: Vec<utilitycss_diagnostics::Diagnostic>,
+}
+
+fn transform_authored_stylesheets(
+    compiler: &mut Compiler,
+    options: &Options,
+) -> Result<AuthoredStylesheetOutput, CliError> {
+    let mut paths = collect_files(&options.inputs, options.output.as_deref())?;
+    paths.extend(collect_files(&options.stylesheet_inputs, options.output.as_deref())?);
+    paths.sort();
+    paths.dedup();
+
+    let mode = compiler.config().serialization_mode();
+    let separator = if mode == CssSerializationMode::Pretty { "\n" } else { "" };
+    let mut css = String::new();
+    let mut diagnostics = Vec::new();
+    for path in paths.into_iter().filter(|path| is_stylesheet(path)) {
+        let content = fs::read_to_string(&path)
+            .map_err(|source| CliError::Io { path: path.clone(), source })?;
+        let source_id = source_id(&path);
+        let output = transform_stylesheet(
+            compiler,
+            StylesheetInput::new(SourceId::new(source_id.clone()), content).with_path(source_id),
+        );
+        if !css.is_empty() {
+            css.push_str(separator);
+        }
+        css.push_str(output.css());
+        diagnostics.extend(output.diagnostics().iter().cloned());
+    }
+    Ok(AuthoredStylesheetOutput { css, diagnostics })
 }
 
 fn collect_files(inputs: &[PathBuf], output: Option<&Path>) -> Result<Vec<PathBuf>, CliError> {
@@ -482,7 +545,14 @@ fn is_supported_source(path: &Path) -> bool {
             | "vue"
             | "svelte"
             | "astro"
+            | "css"
     )
+}
+
+fn is_stylesheet(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("css"))
 }
 
 fn is_ignored_directory(path: &Path) -> bool {
@@ -533,7 +603,10 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use super::{collect_files, parse_options, run, stable_path, CssSerializationMode};
+    use super::{
+        collect_files, parse_options, run, stable_path, transform_authored_stylesheets, Compiler,
+        CompilerConfig, CssSerializationMode, Options,
+    };
 
     #[test]
     fn parses_build_options_and_positional_inputs() {
@@ -574,6 +647,38 @@ mod tests {
             collect_files(std::slice::from_ref(&root), Some(&output)).expect("collection succeeds");
         assert_eq!(files, vec![stable_path(&root.join("src/input.html"))]);
 
+        fs::remove_dir_all(root).expect("test directory is removed");
+    }
+
+    #[test]
+    fn transforms_css_inputs_separately_from_candidate_sources() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is after the Unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("utilitycss-cli-stylesheet-{suffix}"));
+        fs::create_dir_all(&root).expect("test directory is created");
+        let stylesheet = root.join("app.css");
+        fs::write(&stylesheet, ".button { @apply flex p-4; }").expect("stylesheet is written");
+        let options = Options {
+            inputs: Vec::new(),
+            stylesheet_inputs: vec![stylesheet],
+            output: None,
+            mode: Some(CssSerializationMode::Minified),
+            config: None,
+            stats: false,
+            watch: false,
+            once: false,
+            interval: std::time::Duration::from_millis(250),
+        };
+        let mut compiler = Compiler::new(CompilerConfig::new());
+
+        let output = transform_authored_stylesheets(&mut compiler, &options)
+            .expect("stylesheet transformation succeeds");
+
+        assert_eq!(output.css, ".button{display:flex;padding:1rem;}");
+        assert!(output.diagnostics.is_empty());
+        assert_eq!(compiler.source_count(), 0);
         fs::remove_dir_all(root).expect("test directory is removed");
     }
 }

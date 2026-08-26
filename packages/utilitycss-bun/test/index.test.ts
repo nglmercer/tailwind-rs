@@ -31,6 +31,19 @@ class FakeNativeCompiler {
     return this.sources.delete(id);
   }
 
+  public transformStylesheet(_id: string, content: string) {
+    const replacements: Record<string, string> = {
+      "@apply p-4;": "padding: 1rem;",
+      "@apply p-8;": "padding: 2rem;",
+      "@apply hover:bg-red-500;": "background-color: #ef4444;"
+    };
+    let css = content;
+    for (const [from, to] of Object.entries(replacements)) {
+      css = css.replaceAll(from, to);
+    }
+    return { css, diagnostics: [] };
+  }
+
   public build() {
     const diagnostics = [...this.sources.entries()]
       .filter(([, content]) => content.includes("utility-error"))
@@ -56,13 +69,14 @@ class FakeNativeCompiler {
       }));
     const classes = new Set<string>();
     for (const content of this.sources.values()) {
-      for (const match of content.matchAll(/\b(?:flex|p-4|p-8|bg-red-500)\b/g)) {
+      for (const match of content.matchAll(/\b(?:flex|grid|p-4|p-8|bg-red-500)\b/g)) {
         classes.add(match[0]);
       }
     }
     const rules: Record<string, string> = {
       "bg-red-500": ".bg-red-500{background-color:#ef4444;}",
       flex: ".flex{display:flex;}",
+      grid: ".grid{display:grid;}",
       "p-4": ".p-4{padding:1rem;}",
       "p-8": ".p-8{padding:2rem;}"
     };
@@ -173,6 +187,85 @@ test("fails the Bun build for errors and keeps warnings visible", async () => {
     assert.match(warnings.join("\n"), /help: remove the fixture marker/);
   } finally {
     console.warn = originalWarn;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("transforms imported CSS through the stylesheet API", async () => {
+  const root = await makeProject({
+    "entry.ts": 'import "./app.css"; import "utilitycss";',
+    "app.css": ".button { @apply p-4; }"
+  });
+  try {
+    const output = await build(root, utilitycss({ native: FakeNativeCompiler }), "entry.ts");
+    assert.equal(output.result.success, true, JSON.stringify(output.result.logs));
+    assert.match(output.css, /\.button\s*\{\s*padding:\s*1rem;/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("updates imported CSS during an incremental development build", async () => {
+  const root = await makeProject({
+    "entry.ts": 'import "./app.css"; import "utilitycss";',
+    "app.css": ".button { @apply p-4; }"
+  });
+  const plugin = utilitycss({ native: FakeNativeCompiler });
+  try {
+    const first = await build(root, plugin, "entry.ts");
+    assert.match(first.css, /padding:\s*1rem/);
+    await writeFile(join(root, "app.css"), ".button { @apply p-8; }");
+    const second = await build(root, plugin, "entry.ts");
+    assert.match(second.css, /padding:\s*2rem/);
+    assert.doesNotMatch(second.css, /padding:\s*1rem/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("uses Bun's live development server mode alongside incremental graph builds", async () => {
+  const server = Bun.serve({
+    port: 0,
+    development: { hmr: true, console: false },
+    routes: {
+      "/": new Response("utilitycss dev server")
+    },
+    fetch() {
+      return new Response("Not found", { status: 404 });
+    }
+  });
+  try {
+    assert.equal(server.development, true);
+    assert.equal(await (await fetch(server.url)).text(), "utilitycss dev server");
+  } finally {
+    server.stop(true);
+  }
+});
+
+test("recovers after an incremental diagnostic and handles graph creation/removal", async () => {
+  const root = await makeProject({
+    "entry.ts": 'import "./a.ts"; import "./b.ts"; import "utilitycss";',
+    "a.ts": 'export const classes = "p-4";',
+    "b.ts": 'export const classes = "flex";'
+  });
+  const plugin = utilitycss({ native: FakeNativeCompiler });
+  try {
+    const first = await build(root, plugin, "entry.ts");
+    assert.match(first.css, /\.p-4/);
+    assert.match(first.css, /\.flex/);
+
+    await writeFile(join(root, "a.ts"), 'export const classes = "utility-error";');
+    await assert.rejects(() => build(root, plugin, "entry.ts"), /Bundle failed/);
+
+    await writeFile(join(root, "a.ts"), 'export const classes = "p-8";');
+    await writeFile(join(root, "entry.ts"), 'import "./a.ts"; import "./c.ts"; import "utilitycss";');
+    await writeFile(join(root, "c.ts"), 'export const classes = "grid";');
+    const recovered = await build(root, plugin, "entry.ts");
+    assert.equal(recovered.result.success, true, JSON.stringify(recovered.result.logs));
+    assert.match(recovered.css, /\.p-8/);
+    assert.match(recovered.css, /\.grid/);
+    assert.doesNotMatch(recovered.css, /\.flex/);
+  } finally {
     await rm(root, { recursive: true, force: true });
   }
 });

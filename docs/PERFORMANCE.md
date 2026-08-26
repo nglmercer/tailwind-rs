@@ -54,6 +54,9 @@ Include:
 - arbitrary-value-heavy input,
 - variant-heavy input,
 - large TSX files.
+- authored CSS with 100, 1,000, and 10,000 `@apply` directives,
+- repeated and unique composition candidates,
+- large CSS with no `@apply` directives.
 
 ## Methodology
 

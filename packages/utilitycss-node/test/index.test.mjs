@@ -42,3 +42,58 @@ test("forwards lifecycle calls and normalizes a native result", () => {
     ["removeSource", "src/old.html"]
   ]);
 });
+
+test("normalizes the native stylesheet transformation result", () => {
+  class StylesheetNativeCompiler {
+    updateSource() {}
+    removeSource() {
+      return false;
+    }
+    build() {
+      return {
+        css: "",
+        diagnostics: [],
+        stats: {
+          sourcesScanned: 0,
+          bytesScanned: 0,
+          candidatesFound: 0,
+          uniqueCandidates: 0,
+          candidatesParsed: 0,
+          cacheHits: 0,
+          rulesGenerated: 0,
+          rulesRemoved: 0
+        }
+      };
+    }
+    transformStylesheet(id, content, path) {
+      assert.equal(id, "styles.css");
+      assert.equal(path, "styles.css");
+      assert.match(content, /@apply/);
+      return {
+        css: ".button{display:flex;}",
+        diagnostics: [{
+          severity: "warning",
+          code: "apply.fixture",
+          message: "fixture warning",
+          source: id,
+          start: 10,
+          end: 16,
+          help: "fixture help"
+        }]
+      };
+    }
+  }
+
+  const compiler = createCompiler({ native: StylesheetNativeCompiler });
+  const result = compiler.transformStylesheet("styles.css", ".button { @apply flex; }", "styles.css");
+  assert.equal(result.css, ".button{display:flex;}");
+  assert.deepEqual(result.diagnostics, [{
+    severity: "warning",
+    code: "apply.fixture",
+    message: "fixture warning",
+    source: "styles.css",
+    start: 10,
+    end: 16,
+    help: "fixture help"
+  }]);
+});

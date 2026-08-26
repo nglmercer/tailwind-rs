@@ -81,6 +81,7 @@ The initial workspace is intentionally small and runtime-independent:
 - [`utilitycss-utilities`](./crates/utilitycss-utilities/) — extensible initial utility registry and lowering.
 - [`utilitycss-variants`](./crates/utilitycss-variants/) — selector and wrapper transformations.
 - [`utilitycss-css-ir`](./crates/utilitycss-css-ir/) — ordered CSS rules and pretty/minified serialization.
+- [`utilitycss-stylesheet`](./crates/utilitycss-stylesheet/) — token-aware authored CSS transformation and `@apply` composition.
 - [`utilitycss-compiler`](./crates/utilitycss-compiler/) — source indexes, semantic cache, and compiler facade.
 - [`utilitycss-config`](./crates/utilitycss-config/) — declarative JSON configuration loader.
 - [`utilitycss-cli`](./crates/utilitycss-cli/) — native build/watch adapter.
@@ -179,6 +180,18 @@ Before implementation work, read [`LLMS.md`](./LLMS.md), [`docs/VISION.md`](./do
 The baseline formatting, lint, test, and benchmark commands are defined in [`AGENTS.md`](./AGENTS.md) and are runnable against the current workspace.
 
 ## Bun example
+
+`utilitycss` also provides an `@apply`-compatible composition directive backed by the Rust utility
+registry:
+
+```css
+.button {
+  @apply flex items-center gap-2 rounded bg-brand-600 p-4 text-white;
+}
+```
+
+See [`docs/APPLY.md`](./docs/APPLY.md) for supported variants, diagnostics, ordering, adapter APIs,
+and compatibility limitations.
 
 `@utilitycss/node` is the generic JavaScript compiler lifecycle API. `@utilitycss/bun` integrates
 that API with Bun's bundler, fullstack server, and HMR lifecycle:

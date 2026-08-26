@@ -14,11 +14,13 @@ clap = { version = "4.6.6", features = ["derive"] }
 notify = "8.2.0"
 walkdir = "2.5.0"
 utilitycss-css-ir = { version = "0.1.0", path = "../utilitycss-css-ir" }
+utilitycss-diagnostics = { version = "0.1.0", path = "../utilitycss-diagnostics" }
 utilitycss-compiler = { version = "0.1.0", path = "../utilitycss-compiler" }
 utilitycss-config = { version = "0.1.0", path = "../utilitycss-config" }
 utilitycss-extractor = { version = "0.1.0", path = "../utilitycss-extractor" }
 utilitycss-swc = { version = "0.1.0", path = "../utilitycss-swc" }
 utilitycss-span = { version = "0.1.0", path = "../utilitycss-span" }
+utilitycss-stylesheet = { version = "0.1.0", path = "../utilitycss-stylesheet" }
 
 [lints]
 workspace = true

@@ -11,6 +11,10 @@ const first = compiler.build();
 if (!first.includes(".p-4{padding:1rem;}")) {
   throw new Error(`WASM compiler emitted unexpected initial CSS: ${first}`);
 }
+const stylesheet = compiler.transformStylesheet("src/app.css", ".button { @apply flex p-4; }");
+if (stylesheet.css !== ".button{display:flex;padding:1rem;}" || stylesheet.diagnostics.length !== 0) {
+  throw new Error(`WASM stylesheet transform emitted unexpected result: ${JSON.stringify(stylesheet)}`);
+}
 if (!compiler.remove_source("src/app.html")) {
   throw new Error("WASM compiler did not report the source removal");
 }

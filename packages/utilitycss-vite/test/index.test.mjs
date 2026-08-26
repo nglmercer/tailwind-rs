@@ -15,6 +15,12 @@ test("keeps one compiler across transforms and invalidates the virtual module", 
       return false;
     }
 
+    transformStylesheet(id, content, path) {
+      assert.equal(id, "src/app.css");
+      assert.equal(path, "src/app.css");
+      return { css: content.replace("@apply p-4;", "padding: 1rem;"), diagnostics: [] };
+    }
+
     build() {
       return {
         css: ".p-4{padding:1rem;}",
@@ -54,6 +60,83 @@ test("keeps one compiler across transforms and invalidates the virtual module", 
   assert.equal(plugin.load("\u0000virtual:utilitycss.css"), ".p-4{padding:1rem;}");
   assert.equal(updates.length, 2);
   assert.equal(invalidated, true);
+});
+
+test("transforms CSS files without sending them through source extraction", async () => {
+  let updated = false;
+  class CssNativeCompiler {
+    updateSource() {
+      updated = true;
+    }
+    removeSource() {
+      return false;
+    }
+    transformStylesheet(id, content, path) {
+      assert.equal(id, "src/app.css");
+      assert.equal(path, "src/app.css");
+      return { css: content.replace("@apply p-4;", "padding: 1rem;"), diagnostics: [] };
+    }
+    build() {
+      return { css: "", diagnostics: [], stats: {
+        sourcesScanned: 0,
+        bytesScanned: 0,
+        candidatesFound: 0,
+        uniqueCandidates: 0,
+        candidatesParsed: 0,
+        cacheHits: 0,
+        rulesGenerated: 0,
+        rulesRemoved: 0
+      }};
+    }
+  }
+
+  const plugin = utilitycss({ native: CssNativeCompiler });
+  const result = await plugin.transform.call(
+    { warn: () => {}, error: () => { throw new Error("unexpected error"); } },
+    ".button { @apply p-4; }",
+    "src/app.css"
+  );
+  assert.deepEqual(result, { code: ".button { padding: 1rem; }", map: null });
+  assert.equal(updated, false);
+});
+
+test("retransforms CSS on HMR updates and accepts query-string module IDs", async () => {
+  const transformed = [];
+  class CssNativeCompiler {
+    updateSource() {}
+    removeSource() {
+      return false;
+    }
+    transformStylesheet(id, content, path) {
+      transformed.push([id, content, path]);
+      return { css: content, diagnostics: [] };
+    }
+    build() {
+      return { css: "", diagnostics: [], stats: {
+        sourcesScanned: 0,
+        bytesScanned: 0,
+        candidatesFound: 0,
+        uniqueCandidates: 0,
+        candidatesParsed: 0,
+        cacheHits: 0,
+        rulesGenerated: 0,
+        rulesRemoved: 0
+      }};
+    }
+  }
+  const plugin = utilitycss({ native: CssNativeCompiler });
+  const modules = [{ id: "src/app.css" }];
+  await plugin.handleHotUpdate({
+    file: "src/app.css?direct",
+    event: { type: "update" },
+    modules,
+    read: async () => ".button { @apply p-8; }",
+    server: { moduleGraph: {
+      getModuleById: async () => undefined,
+      invalidateModule: () => {}
+    }}
+  });
+  assert.deepEqual(transformed, [["src/app.css", ".button { @apply p-8; }", "src/app.css"]]);
 });
 
 test("normalizes module IDs and removes deleted source state", async () => {

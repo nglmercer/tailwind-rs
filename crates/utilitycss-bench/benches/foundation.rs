@@ -6,6 +6,7 @@ use std::time::Instant;
 use utilitycss_compiler::{Compiler, CompilerConfig, SourceInput};
 use utilitycss_scanner::scan;
 use utilitycss_span::{SourceId, Span};
+use utilitycss_stylesheet::{transform_stylesheet, StylesheetInput};
 use utilitycss_swc::{extract as extract_swc, SourceKind};
 use utilitycss_syntax::parse;
 
@@ -16,6 +17,7 @@ fn main() {
     benchmark_scan_and_parse(ITERATIONS);
     benchmark_swc_extraction(ITERATIONS / 10);
     benchmark_compiler(ITERATIONS / 100);
+    benchmark_stylesheet();
 }
 
 fn benchmark_swc_extraction(iterations: u32) {
@@ -108,4 +110,24 @@ fn benchmark_compiler(iterations: u32) {
         black_box(compiler.build());
     }
     println!("no-op rebuild: {iterations} iterations in {:?}", started.elapsed());
+}
+
+fn benchmark_stylesheet() {
+    for count in [100_usize, 1_000, 10_000] {
+        let source = (0..count)
+            .map(|index| format!(".button-{index} {{ @apply flex p-4 hover:bg-red-500; }}"))
+            .collect::<String>();
+        let mut compiler = Compiler::new(CompilerConfig::new());
+        let started = Instant::now();
+        let output = transform_stylesheet(
+            &mut compiler,
+            StylesheetInput::new(SourceId::new("bench.css"), black_box(source)),
+        );
+        println!(
+            "stylesheet transform: {count} @apply directives in {:?} (css-bytes={}, diagnostics={})",
+            started.elapsed(),
+            output.css().len(),
+            output.diagnostics().len()
+        );
+    }
 }

@@ -30,12 +30,19 @@ export interface BuildResult {
   readonly stats: CompileStats;
 }
 
+/** Result of transforming authored CSS through the native stylesheet layer. */
+export interface StylesheetResult {
+  readonly css: string;
+  readonly diagnostics: readonly Diagnostic[];
+}
+
 /** The native compiler surface consumed by this adapter. */
 export interface NativeCompiler {
   updateSource(id: string, content: string, path?: string, candidates?: readonly CandidateInput[]): void;
   extractCandidates?(content: string, path?: string): readonly CandidateInput[];
   removeSource(id: string): boolean;
   build(): unknown;
+  transformStylesheet?(id: string, content: string, path?: string): unknown;
 }
 
 /** A statically extracted candidate accepted by the native update API. */
@@ -88,6 +95,15 @@ export class Compiler {
     return normalizeBuildResult(this.native.build());
   }
 
+  /** Transforms authored CSS and normalizes native stylesheet diagnostics. */
+  public transformStylesheet(id: string, content: string, path?: string): StylesheetResult {
+    this.assertActive();
+    if (!this.native.transformStylesheet) {
+      throw new Error("native compiler does not expose stylesheet transformation");
+    }
+    return normalizeStylesheetResult(this.native.transformStylesheet(id, content, path));
+  }
+
   /** Releases this adapter's native compiler handle. */
   public dispose(): void {
     this.disposed = true;
@@ -122,6 +138,16 @@ function normalizeBuildResult(value: unknown): BuildResult {
   const stats = normalizeStats(value.stats);
   const diagnostics = value.diagnostics.map(normalizeDiagnostic);
   return { css: value.css, diagnostics, stats };
+}
+
+function normalizeStylesheetResult(value: unknown): StylesheetResult {
+  if (!isRecord(value) || typeof value.css !== "string" || !Array.isArray(value.diagnostics)) {
+    throw new Error("native compiler returned an invalid stylesheet result");
+  }
+  return {
+    css: value.css,
+    diagnostics: value.diagnostics.map(normalizeDiagnostic)
+  };
 }
 
 function normalizeDiagnostic(value: unknown): Diagnostic {

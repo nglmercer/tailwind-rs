@@ -8,6 +8,24 @@ export interface WasmCompiler {
   updateSource(id: string, content: string): void;
   removeSource(id: string): boolean;
   build(): string;
+  transformStylesheet(id: string, content: string): StylesheetResult;
+}
+
+/** A normalized stylesheet transformation result from WASM. */
+export interface StylesheetResult {
+  readonly css: string;
+  readonly diagnostics: readonly Diagnostic[];
+}
+
+/** A diagnostic returned by the WASM stylesheet transformer. */
+export interface Diagnostic {
+  readonly severity?: "error" | "warning" | "note" | "help";
+  readonly code: string;
+  readonly message: string;
+  readonly source?: string;
+  readonly start?: number;
+  readonly end?: number;
+  readonly help?: string;
 }
 
 /** A generated WASM module containing the compiler constructor. */

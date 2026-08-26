@@ -3,15 +3,34 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+use serde::Serialize;
 use utilitycss_compiler::{Compiler, CompilerConfig, SourceInput};
 use utilitycss_css_ir::CssSerializationMode;
 use utilitycss_span::SourceId;
+use utilitycss_stylesheet::{transform_stylesheet, StylesheetInput};
 use wasm_bindgen::prelude::*;
 
 /// A reusable WebAssembly-facing compiler instance.
 #[wasm_bindgen]
 pub struct WasmCompiler {
     inner: Compiler,
+}
+
+#[derive(Serialize)]
+struct WasmDiagnostic {
+    severity: String,
+    code: String,
+    message: String,
+    source: Option<String>,
+    start: Option<u32>,
+    end: Option<u32>,
+    help: Option<String>,
+}
+
+#[derive(Serialize)]
+struct WasmStylesheetResult {
+    css: String,
+    diagnostics: Vec<WasmDiagnostic>,
 }
 
 #[wasm_bindgen]
@@ -39,5 +58,34 @@ impl WasmCompiler {
     /// Builds the current sources and returns serialized CSS.
     pub fn build(&mut self) -> String {
         self.inner.build().css().to_owned()
+    }
+
+    /// Transforms authored CSS and returns CSS plus structured diagnostics.
+    #[wasm_bindgen(js_name = transformStylesheet)]
+    pub fn transform_stylesheet(
+        &mut self,
+        id: String,
+        content: String,
+    ) -> Result<JsValue, JsValue> {
+        let output =
+            transform_stylesheet(&mut self.inner, StylesheetInput::new(SourceId::new(id), content));
+        let diagnostics = output
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| WasmDiagnostic {
+                severity: format!("{:?}", diagnostic.severity()).to_ascii_lowercase(),
+                code: diagnostic.code().to_string(),
+                message: diagnostic.message().to_owned(),
+                source: diagnostic.source().map(ToString::to_string),
+                start: diagnostic.span().map(|span| span.start()),
+                end: diagnostic.span().map(|span| span.end()),
+                help: diagnostic.help().map(str::to_owned),
+            })
+            .collect();
+        serde_wasm_bindgen::to_value(&WasmStylesheetResult {
+            css: output.css().to_owned(),
+            diagnostics,
+        })
+        .map_err(|error| JsValue::from_str(&error.to_string()))
     }
 }

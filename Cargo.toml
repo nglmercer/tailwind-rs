@@ -16,6 +16,7 @@ members = [
     "crates/utilitycss-napi",
     "crates/utilitycss-wasm",
     "crates/utilitycss-css-ir",
+    "crates/utilitycss-stylesheet",
     "crates/utilitycss-compiler",
     "crates/utilitycss-cli",
     "crates/utilitycss-bench",
@@ -31,6 +32,7 @@ default-members = [
     "crates/utilitycss-utilities",
     "crates/utilitycss-variants",
     "crates/utilitycss-css-ir",
+    "crates/utilitycss-stylesheet",
     "crates/utilitycss-compiler",
 ]
 

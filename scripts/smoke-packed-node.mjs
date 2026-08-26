@@ -38,6 +38,14 @@ try {
     if (!result.css.includes(".flex{display:flex;}") || !result.css.includes(".p-4{padding:1rem;}")) {
       throw new Error(\`packed compiler emitted unexpected CSS: \${result.css}\`);
     }
+    const stylesheet = compiler.transformStylesheet(
+      "src/app.css",
+      ".button { @apply flex p-4; }",
+      "src/app.css"
+    );
+    if (stylesheet.diagnostics.length !== 0 || stylesheet.css !== ".button{display:flex;padding:1rem;}") {
+      throw new Error(\`packed stylesheet transform emitted unexpected CSS: \${stylesheet.css}\`);
+    }
     console.log("packed Node smoke passed");
   `;
   execFileSync(process.execPath, ["--input-type=module", "-e", smoke], {

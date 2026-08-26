@@ -11,6 +11,7 @@ crates/
   utilitycss-syntax/
   utilitycss-theme/
   utilitycss-css-ir/
+  utilitycss-stylesheet/
   utilitycss-utilities/
   utilitycss-variants/
   utilitycss-compiler/
@@ -66,6 +67,12 @@ Compiled design-token representation.
 ### `utilitycss-css-ir`
 
 Minimal CSS internal representation and serializer.
+
+### `utilitycss-stylesheet`
+
+Token-aware authored CSS parser and transformer for `@apply`-compatible composition. It delegates
+utility and variant semantics to `utilitycss-compiler` and does not become a dependency of the
+compiler facade.
 
 ### `utilitycss-utilities`
 

@@ -12,6 +12,7 @@ use utilitycss_css_ir::CssSerializationMode;
 use utilitycss_diagnostics::Severity;
 use utilitycss_extractor::{extract_for_framework, Framework};
 use utilitycss_span::{SourceId, Span};
+use utilitycss_stylesheet::{transform_stylesheet, StylesheetInput};
 use utilitycss_swc::{extract as extract_swc, SourceKind as SwcSourceKind};
 
 /// A diagnostic returned across the N-API boundary.
@@ -74,6 +75,15 @@ pub struct JsBuildResult {
     pub diagnostics: Vec<JsDiagnostic>,
     /// Work counters for this build.
     pub stats: JsStats,
+}
+
+/// A stylesheet transformation result returned across the N-API boundary.
+#[napi(object)]
+pub struct JsStylesheetResult {
+    /// Transformed authored CSS.
+    pub css: String,
+    /// Structured stylesheet and composition diagnostics.
+    pub diagnostics: Vec<JsDiagnostic>,
 }
 
 /// A reusable JavaScript-facing compiler instance.
@@ -167,24 +177,7 @@ impl Compiler {
     #[napi]
     pub fn build(&mut self) -> JsBuildResult {
         let output = self.inner.build();
-        let diagnostics = output
-            .diagnostics()
-            .iter()
-            .map(|diagnostic| JsDiagnostic {
-                severity: match diagnostic.severity() {
-                    Severity::Error => "error".to_owned(),
-                    Severity::Warning => "warning".to_owned(),
-                    Severity::Note => "note".to_owned(),
-                    Severity::Help => "help".to_owned(),
-                },
-                code: diagnostic.code().to_string(),
-                message: diagnostic.message().to_owned(),
-                source: diagnostic.source().map(ToString::to_string),
-                start: diagnostic.span().map(|span| span.start()),
-                end: diagnostic.span().map(|span| span.end()),
-                help: diagnostic.help().map(str::to_owned),
-            })
-            .collect();
+        let diagnostics = output.diagnostics().iter().map(js_diagnostic).collect();
         let stats = output.stats();
         JsBuildResult {
             css: output.css().to_owned(),
@@ -200,6 +193,43 @@ impl Compiler {
                 rules_removed: saturating_u32(stats.rules_removed()),
             },
         }
+    }
+
+    /// Transforms authored CSS and resolves explicit `@apply` directives.
+    #[napi]
+    pub fn transform_stylesheet(
+        &mut self,
+        id: String,
+        content: String,
+        path: Option<String>,
+    ) -> JsStylesheetResult {
+        let source_id = SourceId::new(id);
+        let input = match path {
+            Some(path) => StylesheetInput::new(source_id, content).with_path(path),
+            None => StylesheetInput::new(source_id, content),
+        };
+        let output = transform_stylesheet(&mut self.inner, input);
+        JsStylesheetResult {
+            css: output.css().to_owned(),
+            diagnostics: output.diagnostics().iter().map(js_diagnostic).collect(),
+        }
+    }
+}
+
+fn js_diagnostic(diagnostic: &utilitycss_diagnostics::Diagnostic) -> JsDiagnostic {
+    JsDiagnostic {
+        severity: match diagnostic.severity() {
+            Severity::Error => "error".to_owned(),
+            Severity::Warning => "warning".to_owned(),
+            Severity::Note => "note".to_owned(),
+            Severity::Help => "help".to_owned(),
+        },
+        code: diagnostic.code().to_string(),
+        message: diagnostic.message().to_owned(),
+        source: diagnostic.source().map(ToString::to_string),
+        start: diagnostic.span().map(|span| span.start()),
+        end: diagnostic.span().map(|span| span.end()),
+        help: diagnostic.help().map(str::to_owned),
     }
 }
 

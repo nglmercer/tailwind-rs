@@ -312,6 +312,14 @@ fn safe_selector<'a>(selector: &'a str, name: &str) -> Result<&'a str, VariantEr
     Ok(selector)
 }
 
+/// Validates a selector supplied by a caller before variant transformations are applied.
+///
+/// The validation intentionally uses the same safety rules as variant-generated selector
+/// fragments. It is a structural guard, not a complete CSS selector grammar.
+pub fn validate_selector(selector: &str) -> Result<(), VariantError> {
+    safe_selector(selector, "[base]").map(|_| ())
+}
+
 fn apply_selector(selector: &str, base: &str) -> String {
     if selector.contains('&') {
         selector.replace('&', base)

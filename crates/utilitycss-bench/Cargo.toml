@@ -15,6 +15,7 @@ utilitycss-scanner = { version = "0.1.0", path = "../utilitycss-scanner" }
 utilitycss-span = { version = "0.1.0", path = "../utilitycss-span" }
 utilitycss-syntax = { version = "0.1.0", path = "../utilitycss-syntax" }
 utilitycss-swc = { version = "0.1.0", path = "../utilitycss-swc" }
+utilitycss-stylesheet = { version = "0.1.0", path = "../utilitycss-stylesheet" }
 
 [[bench]]
 name = "foundation"

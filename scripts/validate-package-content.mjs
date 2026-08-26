@@ -8,11 +8,11 @@ const npm = process.env.npm_execpath
     ? [process.execPath, join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js")]
     : ["npm"];
 const packages = [
-  { name: "@utilitycss/napi", cwd: "packages/utilitycss-napi" },
-  { name: "@utilitycss/node", cwd: "packages/utilitycss-node" },
-  { name: "@utilitycss/bun", cwd: "packages/utilitycss-bun" },
-  { name: "@utilitycss/vite", cwd: "packages/utilitycss-vite" },
-  { name: "@utilitycss/wasm", cwd: "packages/utilitycss-wasm" },
+  { name: "@utilitycss/napi", cwd: "packages/utilitycss-napi", api: "index.d.ts" },
+  { name: "@utilitycss/node", cwd: "packages/utilitycss-node", api: "dist/index.d.ts" },
+  { name: "@utilitycss/bun", cwd: "packages/utilitycss-bun", api: "dist/index.js" },
+  { name: "@utilitycss/vite", cwd: "packages/utilitycss-vite", api: "dist/index.js" },
+  { name: "@utilitycss/wasm", cwd: "packages/utilitycss-wasm", api: "dist/index.d.ts" },
   { name: "@utilitycss/napi-darwin-arm64", cwd: "packages/utilitycss-napi/npm/darwin-arm64" },
   { name: "@utilitycss/napi-darwin-x64", cwd: "packages/utilitycss-napi/npm/darwin-x64" },
   { name: "@utilitycss/napi-linux-x64-gnu", cwd: "packages/utilitycss-napi/npm/linux-x64-gnu" },
@@ -20,7 +20,7 @@ const packages = [
 ];
 const forbidden = /(^|\/)(?:test|tests|fixtures|node_modules|\.git)(\/|$)|(?:\.log|\.map)$/;
 
-for (const { name, cwd } of packages) {
+for (const { name, cwd, api } of packages) {
   const metadata = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8"));
   if (metadata.license !== "MIT OR Apache-2.0") {
     throw new Error(`${name} does not declare the repository license`);
@@ -37,6 +37,12 @@ for (const { name, cwd } of packages) {
   }
   if (!result.files.some((entry) => entry.path === "package.json")) {
     throw new Error(`${name} does not contain package.json`);
+  }
+  if (api) {
+    const apiPath = join(cwd, api);
+    if (!readFileSync(apiPath, "utf8").includes("transformStylesheet")) {
+      throw new Error(`${name} does not contain the stylesheet transformation API`);
+    }
   }
   console.log(`${name}: ${result.files.length} files`);
 }

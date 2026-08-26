@@ -12,13 +12,13 @@ use std::{
 };
 
 use utilitycss_css_ir::{CssDocument, CssSerializationMode, OrderKey};
-use utilitycss_diagnostics::{Diagnostic, DiagnosticBag};
+use utilitycss_diagnostics::{Diagnostic, DiagnosticBag, DiagnosticCode};
 use utilitycss_scanner::scan;
 use utilitycss_span::{SourceId, Span};
 use utilitycss_syntax::parse;
 use utilitycss_theme::Theme;
 use utilitycss_utilities::{resolve, UtilityErrorKind, UtilityRegistry};
-use utilitycss_variants::{apply, VariantRegistry};
+use utilitycss_variants::{apply, validate_selector, VariantRegistry};
 
 /// Configuration for a compiler instance.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -149,6 +149,52 @@ impl SourceInput {
 pub struct CandidateInput {
     raw: String,
     span: Span,
+}
+
+/// One candidate explicitly supplied to an `@apply` composition operation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ApplyCandidate {
+    raw: String,
+    span: Span,
+}
+
+impl ApplyCandidate {
+    /// Creates an apply candidate with its source-relative byte span.
+    #[must_use]
+    pub fn new(raw: impl Into<String>, span: Span) -> Self {
+        Self { raw: raw.into(), span }
+    }
+
+    /// Returns the candidate text.
+    #[must_use]
+    pub fn raw(&self) -> &str {
+        &self.raw
+    }
+
+    /// Returns the candidate's byte span.
+    #[must_use]
+    pub const fn span(&self) -> Span {
+        self.span
+    }
+}
+
+/// Input to one selector-aware composition batch.
+pub struct CompositionInput<'a> {
+    /// Source identity used by diagnostics.
+    pub source: &'a SourceId,
+    /// The selector receiving the composed declarations.
+    pub selector: &'a str,
+    /// Candidates in the directive's source order.
+    pub candidates: &'a [ApplyCandidate],
+}
+
+/// CSS rules and diagnostics produced by one composition batch.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompositionOutput {
+    /// Rules lowered through the normal utility and variant engines.
+    pub rules: Vec<utilitycss_css_ir::CssRule>,
+    /// Explicit composition diagnostics.
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 impl CandidateInput {
@@ -466,6 +512,104 @@ impl Compiler {
         CompileOutput { css: document.to_css(self.config.serialization_mode()), diagnostics, stats }
     }
 
+    /// Compiles one explicit composition candidate into a caller-owned selector.
+    ///
+    /// Unlike normal source scanning, an unknown utility is an error here because the caller has
+    /// explicitly requested that the candidate be composed.
+    pub fn compose_candidate(
+        &mut self,
+        raw: &str,
+        selector: &str,
+        source: SourceId,
+        span: Span,
+    ) -> Result<utilitycss_css_ir::CssRule, Diagnostic> {
+        if selector.trim().is_empty() {
+            return Err(apply_diagnostic(
+                "apply.invalid-selector",
+                format!("cannot compose `{raw}` into an empty selector"),
+                source,
+                span,
+                Some("add @apply inside a style rule with a selector"),
+            ));
+        }
+        if validate_selector(selector).is_err() {
+            return Err(apply_diagnostic(
+                "apply.invalid-selector",
+                format!("cannot compose `{raw}` into an unsafe selector"),
+                source,
+                span,
+                Some("use a valid CSS style-rule selector"),
+            ));
+        }
+
+        let candidate = parse(raw).map_err(|error| {
+            apply_diagnostic(
+                "apply.invalid-syntax",
+                format!("invalid @apply candidate `{raw}`: {error}"),
+                source.clone(),
+                span,
+                Some("use a utility candidate supported by the active registry"),
+            )
+        })?;
+        let utility =
+            resolve(&candidate, self.config.theme(), self.config.utilities()).map_err(|error| {
+                let (code, help) = if error.kind() == UtilityErrorKind::UnknownUtility {
+                    (
+                        "apply.unknown-utility",
+                        Some("remove the utility or register it before applying it"),
+                    )
+                } else {
+                    ("apply.unsupported", Some("use a utility value supported by the active theme"))
+                };
+                apply_diagnostic(code, error.to_string(), source.clone(), span, help)
+            })?;
+
+        let utility_order = utility.order();
+        let tie_breaker = stable_hash(raw.as_bytes());
+        let Some(rule) = utility.into_rule(tie_breaker).with_selector(selector.to_owned()) else {
+            return Err(apply_diagnostic(
+                "apply.invalid-selector",
+                format!("cannot compose `{raw}` into a style selector"),
+                source,
+                span,
+                Some("use @apply inside a CSS style rule"),
+            ));
+        };
+        let rule = apply(&candidate, rule, self.config.theme(), self.config.variants()).map_err(
+            |error| {
+                apply_diagnostic(
+                    "apply.variant-error",
+                    error.to_string(),
+                    source.clone(),
+                    span,
+                    Some("use a variant supported by the active variant registry"),
+                )
+            },
+        )?;
+        let variant_order = self.config.variants().order(&candidate, self.config.theme());
+        Ok(rule.with_order(OrderKey::new(0, variant_order, utility_order, tie_breaker)))
+    }
+
+    /// Compiles all candidates in one explicit composition batch.
+    #[must_use]
+    pub fn compose(&mut self, input: CompositionInput<'_>) -> CompositionOutput {
+        let mut rules = Vec::new();
+        let mut diagnostics = Vec::new();
+        for candidate in input.candidates {
+            match self.compose_candidate(
+                candidate.raw(),
+                input.selector,
+                input.source.clone(),
+                candidate.span(),
+            ) {
+                Ok(rule) => rules.push(rule),
+                Err(diagnostic) => diagnostics.push(diagnostic),
+            }
+        }
+        rules.sort_by_key(|rule| rule.order());
+        CompositionOutput { rules, diagnostics }
+    }
+
     /// Returns the current compiler configuration.
     #[must_use]
     pub const fn config(&self) -> &CompilerConfig {
@@ -529,6 +673,18 @@ fn compile_candidate(raw: &str, config: &CompilerConfig) -> CandidateCacheEntry 
     }
 }
 
+fn apply_diagnostic(
+    code: &'static str,
+    message: impl Into<String>,
+    source: SourceId,
+    span: Span,
+    help: Option<&str>,
+) -> Diagnostic {
+    let diagnostic =
+        Diagnostic::error(DiagnosticCode::new(code), message).with_source(source).with_span(span);
+    help.map_or(diagnostic.clone(), |help| diagnostic.with_help(help))
+}
+
 fn validate_candidate(
     source: &SourceInput,
     candidate: &CandidateInput,
@@ -562,7 +718,10 @@ mod tests {
 
     use utilitycss_span::Span;
 
-    use super::{CandidateInput, Compiler, CompilerConfig, CompilerError, SourceInput};
+    use super::{
+        ApplyCandidate, CandidateInput, Compiler, CompilerConfig, CompilerError, CompositionInput,
+        SourceInput,
+    };
 
     #[test]
     fn source_updates_are_replacements() {
@@ -744,5 +903,59 @@ mod tests {
 
         assert_eq!(diagnostics.len(), 2);
         assert_ne!(diagnostics[0].span(), diagnostics[1].span());
+    }
+
+    #[test]
+    fn composition_uses_the_callers_selector_and_existing_variants() {
+        let source = SourceId::new("styles.css");
+        let candidates = [
+            ApplyCandidate::new("p-4", Span::new(0, 3).expect("span is ordered")),
+            ApplyCandidate::new("hover:bg-red-500", Span::new(4, 21).expect("span is ordered")),
+            ApplyCandidate::new("md:p-8", Span::new(22, 28).expect("span is ordered")),
+        ];
+        let mut compiler = Compiler::new(CompilerConfig::new());
+
+        let output = compiler.compose(CompositionInput {
+            source: &source,
+            selector: ".button",
+            candidates: &candidates,
+        });
+
+        assert!(output.diagnostics.is_empty());
+        assert_eq!(output.rules[0].selector(), Some(".button"));
+        assert_eq!(output.rules[0].declarations().expect("style rule")[0].property(), "padding");
+        assert!(output.rules.iter().any(|rule| rule.selector() == Some(".button:hover")));
+        assert!(output.rules.iter().any(|rule| rule.selector().is_none()));
+    }
+
+    #[test]
+    fn explicit_unknown_composition_candidates_are_errors_with_their_span() {
+        let source = SourceId::new("styles.css");
+        let span = Span::new(10, 27).expect("span is ordered");
+        let mut compiler = Compiler::new(CompilerConfig::new());
+
+        let error = compiler
+            .compose_candidate("definitely-not-a-utility", ".button", source.clone(), span)
+            .expect_err("explicit unknown utilities must fail");
+
+        assert_eq!(error.code().as_str(), "apply.unknown-utility");
+        assert_eq!(error.source(), Some(&source));
+        assert_eq!(error.span(), Some(span));
+        assert!(error.help().is_some());
+    }
+
+    #[test]
+    fn composition_rejects_unsafe_selectors_without_building_css() {
+        let mut compiler = Compiler::new(CompilerConfig::new());
+        let error = compiler
+            .compose_candidate(
+                "p-4",
+                ".button{body{color:red}}",
+                SourceId::new("styles.css"),
+                Span::empty(0),
+            )
+            .expect_err("unsafe selector must be rejected");
+
+        assert_eq!(error.code().as_str(), "apply.invalid-selector");
     }
 }

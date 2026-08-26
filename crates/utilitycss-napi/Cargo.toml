@@ -21,6 +21,7 @@ utilitycss-diagnostics = { version = "0.1.0", path = "../utilitycss-diagnostics"
 utilitycss-extractor = { version = "0.1.0", path = "../utilitycss-extractor" }
 utilitycss-span = { version = "0.1.0", path = "../utilitycss-span" }
 utilitycss-swc = { version = "0.1.0", path = "../utilitycss-swc" }
+utilitycss-stylesheet = { version = "0.1.0", path = "../utilitycss-stylesheet" }
 
 [build-dependencies]
 napi-build = "2.4.1"

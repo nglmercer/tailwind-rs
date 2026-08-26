@@ -32,10 +32,12 @@ try {
     { cwd: root, stdio: "inherit" }
   );
 
-  writeFileSync(join(root, "entry.html"), '<link rel="stylesheet" href="utilitycss"><main class="flex p-4"></main>\n');
+  writeFileSync(join(root, "entry.html"), '<link rel="stylesheet" href="./app.css"><link rel="stylesheet" href="utilitycss"><main class="flex p-4"></main>\n');
+  writeFileSync(join(root, "app.css"), '.button { @apply flex p-4; }\n');
   writeFileSync(
     join(root, "smoke.ts"),
-    `import { utilitycss } from "@utilitycss/bun";
+    `import "./app.css";
+import { utilitycss } from "@utilitycss/bun";
 const result = await Bun.build({
   entrypoints: ["entry.html"],
   outdir: "dist",
@@ -45,7 +47,7 @@ const result = await Bun.build({
 if (!result.success) throw new Error(JSON.stringify(result.logs));
 const outputs = await Promise.all(result.outputs.map((output) => output.text()));
 const css = outputs.join("\\n");
-if (!css.includes(".flex") || !css.includes(".p-4")) throw new Error(css);
+if (!css.includes(".flex") || !css.includes(".p-4") || !css.includes(".button")) throw new Error(css);
 console.log("packed Bun smoke passed");
 `
   );

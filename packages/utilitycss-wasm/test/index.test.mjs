@@ -12,10 +12,17 @@ test("forwards the WASM compiler surface", () => {
     build() {
       return ".flex{display:flex;}";
     }
+    transformStylesheet() {
+      return { css: ".button{display:flex;}", diagnostics: [] };
+    }
   }
 
   const compiler = createWasmCompiler({ WasmCompiler: FakeCompiler });
   compiler.updateSource("src/app.html", "flex");
   assert.equal(compiler.removeSource("src/app.html"), true);
   assert.equal(compiler.build(), ".flex{display:flex;}");
+  assert.deepEqual(
+    compiler.transformStylesheet("styles.css", ".button { @apply flex; }"),
+    { css: ".button{display:flex;}", diagnostics: [] }
+  );
 });

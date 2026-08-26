@@ -32,7 +32,7 @@ if (import.meta.main) {
     result.outputs.filter((output) => output.path.endsWith(".css")).map((output) => output.text())
   );
   const css = cssOutputs.join("\n");
-  if (!css.includes(".p-4") || !css.includes(".flex")) {
+  if (!css.includes(".p-4") || !css.includes(".flex") || !css.includes(".auth-button")) {
     throw new Error("Bun production build did not include generated utilitycss CSS");
   }
   console.log(`Bun production build passed with ${result.outputs.length} output assets.`);

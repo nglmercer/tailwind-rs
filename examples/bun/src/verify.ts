@@ -27,6 +27,8 @@ const cssOutputs = await Promise.all(
 const css = cssOutputs.map((output) => output.contents).join("\n");
 assert(css.length > 0, "Bun production build did not emit a CSS asset");
 assert(css.includes(".app-shell"), "Bun production build did not include src/style.css");
+assert(css.includes(".auth-button"), "Bun production build did not include src/app.css");
+assert(css.includes("background-color:#ef4444"), "Bun production build did not expand @apply variants");
 const expectedOutput = [
   ".flex",
   ".grid",

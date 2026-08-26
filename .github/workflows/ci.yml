@@ -90,6 +90,10 @@ jobs:
         run: npm run build:native --workspace=@utilitycss/napi
       - name: Build JavaScript adapters
         run: npm run build
+      - name: Install Bun example dependencies
+        run: bun install --cwd examples/bun --frozen-lockfile
+      - name: Typecheck Bun example
+        run: npm --prefix examples/bun run typecheck
       - name: Test Bun adapter
         run: npm test --workspace=@utilitycss/bun
       - name: Verify Bun fullstack example

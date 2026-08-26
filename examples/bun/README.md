@@ -1,10 +1,12 @@
-# Bun example
+# Bun + Preact example
 
-This is a full login/register component example using Bun's HTML/fullstack bundler, a browser-side
-JavaScript UI, and a mock REST API. The Rust compiler is used through `@utilitycss/node` and the
-`@utilitycss/bun` plugin. Bun discovers the HTML and JavaScript module graph, loads the virtual
-`utilitycss` stylesheet, and regenerates it during hot rebuilds; development does not write a CSS
-file to disk.
+This is a small compiler studio built with Bun's HTML/fullstack bundler, Preact, and a mock REST
+API. The page is intentionally more than a CSS smoke test: sign in to see a session-aware dashboard,
+switch between register and login flows, and inspect the compile story shown in the UI.
+
+The Rust compiler is used through `@utilitycss/node` and the `@utilitycss/bun` plugin. Bun discovers
+the HTML and TSX module graph, loads the virtual `utilitycss` stylesheet, and regenerates it during
+hot rebuilds. Development does not write a CSS file to disk and does not start a second watcher.
 
 The example imports the built repository packages directly, so it is intended to be run from a
 checkout of this repository rather than from the npm registry.
@@ -23,26 +25,59 @@ From the repository root, install the workspace dependencies:
 npm install
 ```
 
-Then, from this directory:
+Then, from this directory, install the example's Preact dependency and build the local adapters:
 
 ```bash
+bun install --frozen-lockfile
 bun run setup
+```
+
+Run the non-server smoke test, production build, or HMR server:
+
+```bash
 bun run verify
 bun run build
 bun run dev
 ```
 
-Open <http://localhost:3000> after starting the server. `bun run verify` is a non-server smoke test;
-it runs an actual `Bun.build()` with the plugin, checks generated CSS, and verifies the mock auth
-API. `bun run build` performs the same production build and writes bundled assets to `dist/`.
-`bun run test` runs the verification.
+Open <http://localhost:3000> after starting the server. `bun run verify` performs an actual
+`Bun.build()` with the plugin, checks generated CSS plus HTML/JavaScript assets, and verifies the
+mock auth API. `bun run build` writes bundled assets to `dist/`. `bun run test` is an alias for the
+verification command.
 
-`bun run setup` builds the current platform's native binding plus the Node and Bun adapters. The
-repository-local `bunfig.toml` loads the plugin through Bun's fullstack development lifecycle.
+The repository-local `bunfig.toml` connects Bun's fullstack development lifecycle to the plugin:
+
+```toml
+[serve.static]
+plugins = ["../../packages/utilitycss-bun/src/index.ts"]
+```
+
+The published-package equivalent is:
+
+```toml
+[serve.static]
+plugins = ["@utilitycss/bun"]
+```
+
+## How the example is structured
+
+- `src/index.html` is the Bun HTML entry and requests the virtual stylesheet with
+  `<link rel="stylesheet" href="utilitycss" />`.
+- `src/app.tsx` is the Preact browser application. It contains typed components, hooks, the auth
+  form, and the authenticated compiler dashboard.
+- `src/server.ts` imports the HTML route and delegates `/api/*` requests to the mock API.
+- `src/production-build.ts` proves that an explicit `Bun.build()` can use the same plugin in a
+  production bundle.
+- `src/verify.ts` checks the generated asset and exercises registration, login, sessions, logout,
+  duplicate registration, and invalid credentials.
+
+`@utilitycss/node` remains the generic JavaScript compiler lifecycle API. `@utilitycss/bun` is the
+Bun-specific bundler/fullstack/HMR integration that collects source modules through Bun hooks and
+returns CSS as a virtual module. The example uses the latter; it does not run a CLI watcher.
 
 ## Demo account
 
-The login form shows the demo credentials in the UI:
+The login form shows these credentials:
 
 ```text
 Email:    demo@example.com
@@ -62,16 +97,14 @@ The server exposes these same-origin endpoints:
 - `GET /api/auth/me` — returns the current session user;
 - `POST /api/auth/logout` — clears the session cookie.
 
-## What it verifies
+## What it demonstrates
 
-The page intentionally uses several supported utility families and variants:
-
-- reusable login, register, password visibility, status, and authenticated dashboard components;
+- Preact components and hooks bundled from TSX through Bun;
+- virtual CSS generated from HTML and TSX module-graph sources;
 - spacing, sizing, colors, radius, flexbox, and grid utilities;
-- an arbitrary width value (`max-w-[42rem]`);
-- the `hover:` and responsive `md:` variants;
-- deterministic CSS output generated as Bun's virtual stylesheet asset;
-- JavaScript-family extraction from static `cn(...)` class helper calls.
+- arbitrary values such as `max-w-[42rem]` and `hover:`/responsive `md:` variants;
+- deterministic output and stale-source removal between fresh build cycles;
+- an HttpOnly mock session cookie and useful error states in the browser UI;
+- Bun HMR without `public/utilitycss.css` or a separate utilitycss watch process.
 
-The production `dist/` output is ignored by this example's `.gitignore`. Development uses Bun HMR
-and does not require `public/utilitycss.css` or a separate utilitycss watcher.
+The production `dist/` output and local `node_modules/` are ignored by this example's `.gitignore`.

@@ -199,6 +199,8 @@ for (const [label, platform, arch] of [
 runWasmGate();
 
 if (commandAvailable("bun", ["--version"])) {
+  run("Bun example dependency install", "bun", ["install", "--cwd", join(repositoryRoot, "examples", "bun"), "--frozen-lockfile"]);
+  runReleaseNpm("Bun example typecheck", ["--prefix", "examples/bun", "run", "typecheck"]);
   runReleaseNpm("Bun adapter tests", ["test", "--workspace=@utilitycss/bun"]);
   runReleaseNpm("Bun fullstack example verify", ["--prefix", "examples/bun", "run", "verify"]);
   runReleaseNpm("Bun fullstack production build", ["--prefix", "examples/bun", "run", "build"]);

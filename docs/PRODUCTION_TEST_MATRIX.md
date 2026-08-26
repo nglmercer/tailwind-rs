@@ -14,6 +14,9 @@ npm run build --workspace=@utilitycss/node
 npm test --workspace=@utilitycss/node
 npm run build --workspace=@utilitycss/bun
 npm test --workspace=@utilitycss/bun
+bun install --cwd examples/bun --frozen-lockfile
+npm --prefix examples/bun run typecheck
+npm --prefix examples/bun run setup
 npm --prefix examples/bun run verify
 ```
 
@@ -80,6 +83,9 @@ The Bun gate uses Bun's plugin lifecycle, not a CLI watcher:
 ```bash
 npm run build --workspace=@utilitycss/bun
 npm test --workspace=@utilitycss/bun
+bun install --cwd examples/bun --frozen-lockfile
+npm --prefix examples/bun run typecheck
+npm --prefix examples/bun run setup
 npm --prefix examples/bun run verify
 npm --prefix examples/bun run build
 ```

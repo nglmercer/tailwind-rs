@@ -88,6 +88,10 @@ The default virtual specifier is `utilitycss`; callers MAY override it with `spe
 exports the configurable `utilitycss()` factory and a zero-options plugin object as its default
 export, which lets Bun load it directly from `bunfig.toml`.
 
+The repository example in [`examples/bun`](../examples/bun/) uses Preact for its browser UI. Preact
+is an application dependency, not part of the Bun adapter: `@utilitycss/node` remains the generic
+compiler lifecycle API, while `@utilitycss/bun` supplies Bun bundler/fullstack/HMR hooks.
+
 ## Deno
 
 Preferred options:

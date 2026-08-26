@@ -3,9 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "dependencies": {
+    "preact": "10.29.8"
+  },
   "scripts": {
     "setup": "npm --prefix ../.. run build:native && npm --prefix ../.. run build --workspace=@utilitycss/node && npm --prefix ../.. run build --workspace=@utilitycss/bun",
     "build": "bun run src/production-build.ts",
+    "typecheck": "npm exec -- tsc -p tsconfig.json --noEmit",
     "verify": "bun run src/verify.ts",
     "test": "bun run verify",
     "dev": "bun --hot src/server.ts"

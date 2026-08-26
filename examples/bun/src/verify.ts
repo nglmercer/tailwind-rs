@@ -18,6 +18,7 @@ async function json<T>(response: Response): Promise<T> {
 }
 
 const result = await buildProduction({ write: false });
+assert(result.success, `Bun production build failed: ${result.logs.map((log) => log.message).join("\n")}`);
 const cssOutputs = await Promise.all(
   result.outputs
     .map(async (output, index) => ({ path: result.outputs[index].path, contents: await output.text() }))
@@ -31,6 +32,7 @@ const expectedOutput = [
   ".bg-brand-600",
   ".hover\\:bg-red-500\\/50:hover",
   ".md\\:grid-cols-2",
+  ".rounded",
   "@media"
 ];
 
@@ -90,6 +92,11 @@ const badLoginResponse = await apiRequest("/api/auth/login", {
 });
 assert(badLoginResponse.status === 401, `bad login returned ${badLoginResponse.status}`);
 
-console.log("Bun auth example verification passed.");
+const outputKinds = result.outputs.map((output) => output.path.split(".").pop()).filter(Boolean);
+assert(outputKinds.includes("html"), "Bun production build did not emit the HTML entry asset");
+assert(outputKinds.includes("js"), "Bun production build did not emit the Preact JavaScript asset");
+
+console.log("Bun + Preact example verification passed.");
 console.log(`Generated stylesheet asset (${css.length} bytes) from the Bun module graph.`);
+console.log(`Production assets: ${outputKinds.join(", ")}.`);
 console.log("REST mock verified: register, duplicate register, session lookup, logout, and invalid login.");

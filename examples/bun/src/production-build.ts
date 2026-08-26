@@ -10,14 +10,16 @@ export interface ProductionBuildOptions {
 
 /** Builds the fullstack example with Bun's bundler and the utilitycss plugin. */
 export async function buildProduction(options: ProductionBuildOptions = {}) {
-  return Bun.build({
+  const buildOptions = {
     entrypoints: [resolve(projectRoot, "src", "server.ts")],
     outdir: outputDirectory,
     target: "bun",
     minify: true,
     plugins: [utilitycss({ pretty: false })],
     write: options.write ?? true
-  });
+  } as Bun.BuildConfig & { write?: boolean };
+
+  return Bun.build(buildOptions);
 }
 
 if (import.meta.main) {

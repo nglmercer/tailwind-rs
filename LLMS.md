@@ -76,7 +76,9 @@ source deletion by rebuilding from the current graph. Development MUST NOT requi
 
 The repository example at `examples/bun` is the integration reference. Its `bunfig.toml` covers
 `bun --hot src/server.ts`; `src/production-build.ts` covers explicit `Bun.build()` production
-usage; and `bun run verify` covers compiler loading, CSS output, and mock API behavior.
+usage; and `bun run verify` covers compiler loading, CSS output, and mock API behavior. The browser
+entry is a typed Preact application in `src/app.tsx`; Preact is example-level UI code and MUST NOT
+become a dependency of the compiler or Bun adapter packages.
 
 ## Working method
 

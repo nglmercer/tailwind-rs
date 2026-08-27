@@ -7,7 +7,7 @@ use std::{collections::BTreeMap, error::Error, fmt, fs, path::Path};
 
 use serde::Deserialize;
 use utilitycss_css_ir::{BrowserTarget, CssSerializationMode};
-use utilitycss_theme::{Theme, ThemeBuilder};
+use utilitycss_theme::{Theme, ThemeBuilder, ThemeValidationError};
 use utilitycss_utilities::{
     ColorKind, Dimension, SpacingEdge, UtilityDefinition, UtilityRegistry, ValueNamespace,
 };
@@ -146,23 +146,31 @@ impl ConfigFile {
     /// Returns a deterministic configuration fingerprint.
     #[must_use]
     pub fn fingerprint(&self) -> u64 {
-        let mut hash = self.theme.fingerprint();
+        let mut hash = fnv1a(0xcbf29ce484222325_u64, b"utilitycss-config-fingerprint-v2");
+        hash = fnv1a(hash, &self.theme.fingerprint().to_le_bytes());
         for (name, definition) in self.utilities.definitions() {
-            hash = fnv1a(hash, name.as_bytes());
-            hash = fnv1a(hash, format!("{definition:?}").as_bytes());
+            hash = fnv1a_text(hash, name);
+            hash = fnv1a(hash, &definition.fingerprint().to_le_bytes());
         }
         for (name, definition) in self.variants.definitions() {
-            hash = fnv1a(hash, name.as_bytes());
-            hash = fnv1a(hash, format!("{definition:?}").as_bytes());
+            hash = fnv1a_text(hash, name);
+            hash = fnv1a(hash, &definition.fingerprint().to_le_bytes());
         }
-        hash = fnv1a(hash, format!("{:?}", self.preset).as_bytes());
-        hash = fnv1a(hash, format!("{:?}", self.serialization_mode).as_bytes());
-        hash = fnv1a(hash, self.browser_target.as_str().as_bytes());
+        hash = fnv1a_text(hash, self.preset.name());
+        hash = fnv1a_text(
+            hash,
+            match self.serialization_mode {
+                CssSerializationMode::Pretty => "pretty",
+                CssSerializationMode::Minified => "minified",
+            },
+        );
+        hash = fnv1a_text(hash, self.browser_target.as_str());
         hash
     }
 
     /// Validates all registry names and configured semantic definitions.
     pub fn validate(&self) -> Result<(), ConfigError> {
+        self.theme.validate().map_err(ConfigError::InvalidTheme)?;
         self.utilities.validate().map_err(|error| ConfigError::InvalidPlugin {
             name: "utilities".to_owned(),
             message: error.to_string(),
@@ -213,6 +221,8 @@ pub enum ConfigError {
         /// Validation failure detail.
         message: String,
     },
+    /// A configured theme token contains an unsafe CSS fragment.
+    InvalidTheme(ThemeValidationError),
     /// The CSS-first configuration document is malformed or unsafe.
     InvalidCss(String),
 }
@@ -236,6 +246,7 @@ impl fmt::Display for ConfigError {
             Self::InvalidPlugin { name, message } => {
                 write!(formatter, "invalid plugin definition `{name}`: {message}")
             }
+            Self::InvalidTheme(error) => write!(formatter, "invalid theme: {error}"),
             Self::InvalidCss(message) => write!(formatter, "invalid CSS configuration: {message}"),
         }
     }
@@ -491,21 +502,45 @@ fn theme_variable(variable: &str) -> (String, String) {
 fn strip_css_comments(input: &str) -> Result<String, ConfigError> {
     let mut output = String::with_capacity(input.len());
     let mut comment = false;
+    let mut quote = None;
+    let mut escaped = false;
     let bytes = input.as_bytes();
     let mut cursor = 0;
     while cursor < bytes.len() {
-        if !comment && bytes.get(cursor..cursor + 2) == Some(b"/*") {
+        if comment {
+            if bytes.get(cursor..cursor + 2) == Some(b"*/") {
+                comment = false;
+                cursor += 2;
+            } else {
+                cursor += input[cursor..].chars().next().map_or(1, char::len_utf8);
+            }
+            continue;
+        }
+        let character = input[cursor..].chars().next().unwrap_or('\0');
+        if escaped {
+            output.push(character);
+            escaped = false;
+            cursor += character.len_utf8();
+        } else if character == '\\' && quote.is_some() {
+            output.push(character);
+            escaped = true;
+            cursor += character.len_utf8();
+        } else if let Some(active_quote) = quote {
+            output.push(character);
+            if character == active_quote {
+                quote = None;
+            }
+            cursor += character.len_utf8();
+        } else if bytes.get(cursor..cursor + 2) == Some(b"/*") {
             comment = true;
             cursor += 2;
-        } else if comment && bytes.get(cursor..cursor + 2) == Some(b"*/") {
-            comment = false;
-            cursor += 2;
-        } else if !comment {
-            let character = input[cursor..].chars().next().unwrap_or('\0');
+        } else if matches!(character, '\'' | '"') {
+            quote = Some(character);
             output.push(character);
             cursor += character.len_utf8();
         } else {
-            cursor += input[cursor..].chars().next().map_or(1, char::len_utf8);
+            output.push(character);
+            cursor += character.len_utf8();
         }
     }
     if comment {
@@ -829,6 +864,11 @@ fn fnv1a(mut hash: u64, bytes: &[u8]) -> u64 {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     hash
+}
+
+fn fnv1a_text(hash: u64, value: &str) -> u64 {
+    let hash = fnv1a(hash, &u64::try_from(value.len()).unwrap_or(u64::MAX).to_le_bytes());
+    fnv1a(hash, value.as_bytes())
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1177,6 +1217,19 @@ mod tests {
             super::parse_css("/* missing"),
             Err(ConfigError::InvalidCss(message)) if message == "unterminated comment"
         ));
+        let config = super::parse_css(
+            r#"@theme {
+                --content-example: "literal /* not a comment */";
+                /* this comment is removed */
+                --spacing-card: 1rem;
+            }"#,
+        )
+        .expect("comment markers inside strings are preserved");
+        assert_eq!(
+            config.theme().token("content", "example"),
+            Some("\"literal /* not a comment */\"")
+        );
+        assert_eq!(config.theme().spacing("card"), Some("1rem"));
         assert!(matches!(
             super::parse_css("body { color: red; }"),
             Err(ConfigError::InvalidCss(message)) if message.contains("top-level")
@@ -1199,5 +1252,17 @@ mod tests {
         );
         assert!(!config.utilities().contains("fake"));
         assert!(!config.variants().names().contains(&"fake"));
+    }
+
+    #[test]
+    fn rejects_unsafe_theme_values_before_compilation() {
+        assert!(matches!(
+            parse_json(r#"{"theme":{"breakpoints":{"evil":"0px){body{color:red}"}}}"#),
+            Err(ConfigError::InvalidTheme(error)) if error.namespace() == "breakpoint" && error.key() == "evil"
+        ));
+        assert!(matches!(
+            parse_json(r#"{"theme":{"radii":{"DEFAULT":"0px;display:block"}}}"#),
+            Err(ConfigError::InvalidTheme(error)) if error.namespace() == "radius" && error.key() == "DEFAULT"
+        ));
     }
 }

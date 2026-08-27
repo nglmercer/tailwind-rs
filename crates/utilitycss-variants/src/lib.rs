@@ -139,6 +139,44 @@ impl VariantDefinition {
         Self::AtRule { name: name.into(), prelude: prelude.into(), order }
     }
 
+    /// Returns a canonical semantic fingerprint for this definition.
+    ///
+    /// The representation is deliberately independent of Rust's `Debug` formatting so cache and
+    /// protocol identities remain stable across harmless implementation refactors.
+    #[must_use]
+    pub fn fingerprint(&self) -> u64 {
+        let mut hash = 0xcbf29ce484222325_u64;
+        match self {
+            Self::Pseudo { suffix, order } => {
+                hash = hash_tag(hash, 0);
+                hash = hash_text(hash, suffix);
+                hash_u16(hash, *order)
+            }
+            Self::Media { name, prelude, order } => {
+                hash = hash_tag(hash, 1);
+                hash = hash_text(hash, name);
+                hash = hash_text(hash, prelude);
+                hash_u16(hash, *order)
+            }
+            Self::Ancestor { prefix, order } => {
+                hash = hash_tag(hash, 2);
+                hash = hash_text(hash, prefix);
+                hash_u16(hash, *order)
+            }
+            Self::Selector { pattern, order } => {
+                hash = hash_tag(hash, 3);
+                hash = hash_text(hash, pattern);
+                hash_u16(hash, *order)
+            }
+            Self::AtRule { name, prelude, order } => {
+                hash = hash_tag(hash, 4);
+                hash = hash_text(hash, name);
+                hash = hash_text(hash, prelude);
+                hash_u16(hash, *order)
+            }
+        }
+    }
+
     fn order(&self) -> u16 {
         match self {
             Self::Pseudo { order, .. }
@@ -148,6 +186,27 @@ impl VariantDefinition {
             | Self::AtRule { order, .. } => *order,
         }
     }
+}
+
+fn hash_tag(hash: u64, tag: u8) -> u64 {
+    fnv1a(hash, &[tag])
+}
+
+fn hash_u16(hash: u64, value: u16) -> u64 {
+    fnv1a(hash, &value.to_le_bytes())
+}
+
+fn hash_text(hash: u64, value: &str) -> u64 {
+    let hash = fnv1a(hash, &u64::try_from(value.len()).unwrap_or(u64::MAX).to_le_bytes());
+    fnv1a(hash, value.as_bytes())
+}
+
+fn fnv1a(mut hash: u64, bytes: &[u8]) -> u64 {
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 /// Built-in variant definitions indexed by their source name.
@@ -580,6 +639,7 @@ fn apply_one(
                 );
             }
             if let Some(breakpoint) = theme.breakpoint(name) {
+                let breakpoint = safe_selector(breakpoint, name)?;
                 return Ok(CssRule::at_rule(
                     rule.order(),
                     "media",
@@ -713,7 +773,7 @@ mod tests {
     use utilitycss_syntax::parse;
     use utilitycss_theme::Theme;
 
-    use super::{apply, VariantErrorKind, VariantRegistry};
+    use super::{apply, VariantDefinition, VariantErrorKind, VariantRegistry};
 
     fn base_rule() -> CssRule {
         CssRule::style(
@@ -763,7 +823,7 @@ mod tests {
     #[test]
     fn rejects_unsafe_registered_variant_definitions() {
         let mut registry = VariantRegistry::new();
-        registry.register("unsafe", super::VariantDefinition::pseudo(":hover;body{}", 999));
+        registry.register("unsafe", VariantDefinition::pseudo(":hover;body{}", 999));
         let candidate = parse("unsafe:flex").expect("candidate is valid");
 
         let error = apply(&candidate, base_rule(), &Theme::default(), &registry)
@@ -772,7 +832,7 @@ mod tests {
         assert_eq!(error.kind(), VariantErrorKind::UnsafeSelector);
 
         let mut registry = VariantRegistry::new();
-        registry.register("unsafe-at", super::VariantDefinition::at_rule("1media", "screen", 999));
+        registry.register("unsafe-at", VariantDefinition::at_rule("1media", "screen", 999));
         let candidate = parse("unsafe-at:flex").expect("candidate is valid");
         let error = apply(&candidate, base_rule(), &Theme::default(), &registry)
             .expect_err("at-rule names must be valid identifiers");
@@ -782,13 +842,36 @@ mod tests {
     #[test]
     fn validates_registered_variant_definitions_before_resolution() {
         let mut registry = VariantRegistry::new();
-        registry.register("unsafe", super::VariantDefinition::pseudo(":hover;body{}", 999));
+        registry.register("unsafe", VariantDefinition::pseudo(":hover;body{}", 999));
 
         let error = registry.validate().expect_err("unsafe definitions fail early");
         assert!(matches!(
             error,
             super::VariantRegistryError::InvalidDefinition { name, .. } if name == "unsafe"
         ));
+    }
+
+    #[test]
+    fn rejects_unsafe_theme_breakpoints_at_resolution() {
+        let theme = Theme::builder().breakpoint("evil", "0px){body{color:red}").build();
+        let candidate = parse("evil:flex").expect("candidate is valid");
+
+        let error = apply(&candidate, base_rule(), &theme, &VariantRegistry::new())
+            .expect_err("theme breakpoints are validated before media emission");
+
+        assert_eq!(error.kind(), VariantErrorKind::UnsafeSelector);
+    }
+
+    #[test]
+    fn variant_fingerprints_include_variant_kind_and_fields() {
+        assert_ne!(
+            VariantDefinition::pseudo(":hover", 1).fingerprint(),
+            VariantDefinition::pseudo(":focus", 1).fingerprint()
+        );
+        assert_ne!(
+            VariantDefinition::pseudo(":hover", 1).fingerprint(),
+            VariantDefinition::selector("&:hover", 1).fingerprint()
+        );
     }
 
     #[test]

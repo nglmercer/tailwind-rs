@@ -7,6 +7,44 @@ use std::fmt;
 
 use serde::Serialize;
 
+/// Maximum source length representable by a [`Span`] offset.
+pub const MAX_SOURCE_BYTES: usize = u32::MAX as usize;
+
+/// Error returned when a source cannot be represented by the 32-bit span model.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SourceSizeError {
+    length: usize,
+}
+
+impl SourceSizeError {
+    /// Returns the rejected source length in bytes.
+    #[must_use]
+    pub const fn length(self) -> usize {
+        self.length
+    }
+}
+
+impl fmt::Display for SourceSizeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "source is {} bytes, but source locations support at most {} bytes",
+            self.length, MAX_SOURCE_BYTES
+        )
+    }
+}
+
+impl std::error::Error for SourceSizeError {}
+
+/// Checks whether a source length can be represented by [`Span`] offsets.
+pub fn validate_source_len(length: usize) -> Result<(), SourceSizeError> {
+    if length > MAX_SOURCE_BYTES {
+        Err(SourceSizeError { length })
+    } else {
+        Ok(())
+    }
+}
+
 /// A stable identity for a source unit supplied to the compiler.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct SourceId(String);
@@ -97,7 +135,7 @@ impl Span {
 
 #[cfg(test)]
 mod tests {
-    use super::{SourceId, Span};
+    use super::{validate_source_len, SourceId, Span, MAX_SOURCE_BYTES};
 
     #[test]
     fn source_ids_are_orderable_and_displayable() {
@@ -124,5 +162,13 @@ mod tests {
     #[test]
     fn reversed_spans_are_rejected_without_panicking() {
         assert_eq!(Span::new(9, 4), None);
+    }
+
+    #[test]
+    fn source_lengths_are_checked_before_span_conversion() {
+        assert!(validate_source_len(MAX_SOURCE_BYTES).is_ok());
+        let error = validate_source_len(MAX_SOURCE_BYTES.saturating_add(1))
+            .expect_err("oversized source is not representable");
+        assert_eq!(error.length(), MAX_SOURCE_BYTES.saturating_add(1));
     }
 }

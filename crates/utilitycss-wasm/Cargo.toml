@@ -17,6 +17,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde-wasm-bindgen = "0.6"
 utilitycss-compiler = { version = "0.1.0", path = "../utilitycss-compiler" }
 utilitycss-css-ir = { version = "0.1.0", path = "../utilitycss-css-ir" }
+utilitycss-scanner = { version = "0.1.0", path = "../utilitycss-scanner" }
 utilitycss-stylesheet = { version = "0.1.0", path = "../utilitycss-stylesheet" }
 utilitycss-span = { version = "0.1.0", path = "../utilitycss-span" }
 wasm-bindgen = "0.2"

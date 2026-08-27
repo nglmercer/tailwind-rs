@@ -93,6 +93,10 @@ generated CSS deterministic and reports unsupported modern features as structure
 target participates in configuration fingerprints so changing browser policy invalidates cached
 semantic results.
 
+The CLI `watch` command watches the file supplied through `--config` and reloads a valid change
+without restarting. If a changed configuration is invalid, the watcher reports the diagnostic and
+retains the last valid configuration until the file is fixed.
+
 ## JavaScript configuration
 
 Core MUST NOT require executing JavaScript.

@@ -41,6 +41,7 @@ export function utilitycss(options: UtilityCssBunOptions = {}): BunPlugin {
   let lastSuccessfulBuild = 0;
   const moduleSources = new Map<string, string>();
   const moduleDependencies = new Map<string, Set<string>>();
+  const moduleDependencyCompleteness = new Map<string, boolean>();
 
   const createBuildCompiler = (): void => {
     buildNumber += 1;
@@ -78,6 +79,12 @@ export function utilitycss(options: UtilityCssBunOptions = {}): BunPlugin {
     if (!entrypoints) {
       return;
     }
+    // A failed resolution means Bun may know about a module that this adapter cannot identify.
+    // Retaining all observed sources is safer than pruning a live module and silently dropping
+    // its CSS. This also covers aliases and package-style imports handled by Bun's resolver.
+    if ([...moduleDependencyCompleteness.values()].some((complete) => !complete)) {
+      return;
+    }
     const roots = entrypoints
       .map((entrypoint) => {
         try {
@@ -92,6 +99,7 @@ export function utilitycss(options: UtilityCssBunOptions = {}): BunPlugin {
       if (!reachable.has(id)) {
         moduleSources.delete(id);
         moduleDependencies.delete(id);
+        moduleDependencyCompleteness.delete(id);
         compiler?.removeSource(id);
       }
     }
@@ -111,7 +119,9 @@ export function utilitycss(options: UtilityCssBunOptions = {}): BunPlugin {
         const sourceId = normalizeModuleId(path);
         const source = await Bun.file(path).text();
         moduleSources.set(sourceId, source);
-        moduleDependencies.set(sourceId, resolveDependencies(sourceId, source));
+        const resolution = resolveDependencies(sourceId, source, specifier);
+        moduleDependencies.set(sourceId, resolution.dependencies);
+        moduleDependencyCompleteness.set(sourceId, resolution.complete);
         requireCompiler().updateSource(sourceId, source, sourceId);
 
         // Returning undefined preserves Bun's native loader and parser for the
@@ -302,24 +312,41 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function resolveDependencies(id: string, source: string): Set<string> {
+interface DependencyResolution {
+  readonly dependencies: Set<string>;
+  readonly complete: boolean;
+}
+
+function resolveDependencies(
+  id: string,
+  source: string,
+  ignoredSpecifier: string
+): DependencyResolution {
   const dependencies = new Set<string>();
+  let complete = true;
   const specifiers = [
     ...source.matchAll(/(?:import\s+(?:[^"'`]*?\s+from\s+|)|export\s+[^"'`]*?\s+from\s+|require\s*\(|import\s*\()\s*["']([^"']+)["']/g),
     ...source.matchAll(/(?:src|href)\s*=\s*["']([^"']+)["']/gi)
   ];
   for (const match of specifiers) {
     const specifier = match[1];
-    if (!specifier.startsWith(".")) {
+    if (specifier === ignoredSpecifier || /^(?:node|bun):/i.test(specifier)) {
+      continue;
+    }
+    // URLs are resources, not Bun modules. Hash-prefixed specifiers remain eligible because they
+    // are a common alias form in Bun/TypeScript projects.
+    if (/^(?:[a-z][a-z\d+.-]*:)?\/\//i.test(specifier)) {
       continue;
     }
     try {
       dependencies.add(normalizeModuleId(Bun.resolveSync(specifier, dirname(id))));
     } catch {
-      // Bun's resolver will report unresolved imports through its normal build diagnostics.
+      complete = false;
+      // Bun reports unresolved imports through its normal build diagnostics. Until then, retain
+      // every observed source so a failed custom resolution cannot remove live CSS.
     }
   }
-  return dependencies;
+  return { dependencies, complete };
 }
 
 function reachableModules(

@@ -3,7 +3,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, error::Error, fmt};
 
 use serde::Serialize;
 
@@ -37,6 +37,43 @@ pub struct ThemeToken {
     /// CSS value.
     pub value: String,
 }
+
+/// A theme token that cannot be safely embedded in generated CSS.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ThemeValidationError {
+    namespace: String,
+    key: String,
+}
+
+impl ThemeValidationError {
+    fn new(namespace: impl Into<String>, key: impl Into<String>) -> Self {
+        Self { namespace: namespace.into(), key: key.into() }
+    }
+
+    /// Returns the token namespace containing the unsafe value.
+    #[must_use]
+    pub fn namespace(&self) -> &str {
+        &self.namespace
+    }
+
+    /// Returns the token key containing the unsafe value.
+    #[must_use]
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+}
+
+impl fmt::Display for ThemeValidationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "theme token `{}:{}` contains an unsafe CSS fragment",
+            self.namespace, self.key
+        )
+    }
+}
+
+impl Error for ThemeValidationError {}
 
 impl Theme {
     /// Returns a builder pre-populated with the built-in baseline tokens.
@@ -169,6 +206,20 @@ impl Theme {
             }));
         }
         tokens
+    }
+
+    /// Validates every configured value against the compiler's structural CSS safety policy.
+    ///
+    /// This check is intentionally conservative. Theme values are untrusted configuration and
+    /// are eventually embedded in declarations, selectors, or at-rule preludes. Individual
+    /// semantic sinks still validate values as defense in depth.
+    pub fn validate(&self) -> Result<(), ThemeValidationError> {
+        for token in self.tokens() {
+            if unsafe_css_fragment(&token.value) {
+                return Err(ThemeValidationError::new(token.namespace, token.key));
+            }
+        }
+        Ok(())
     }
 
     /// Returns a stable fingerprint for all theme tokens.
@@ -548,6 +599,46 @@ fn fnv1a(mut hash: u64, bytes: &[u8]) -> u64 {
     hash
 }
 
+fn unsafe_css_fragment(value: &str) -> bool {
+    let contains_style_close = value
+        .as_bytes()
+        .windows(b"</style".len())
+        .any(|window| window.eq_ignore_ascii_case(b"</style"));
+    if contains_style_close {
+        return true;
+    }
+    let mut quote = None;
+    let mut escaped = false;
+    for (offset, character) in value.char_indices() {
+        if character.is_control() {
+            return true;
+        }
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if character == '\\' && quote.is_some() {
+            escaped = true;
+            continue;
+        }
+        if let Some(active_quote) = quote {
+            if character == active_quote {
+                quote = None;
+            }
+            continue;
+        }
+        if value[offset..].starts_with("/*") || value[offset..].starts_with("*/") {
+            return true;
+        }
+        if matches!(character, '\'' | '"') {
+            quote = Some(character);
+        } else if matches!(character, ';' | '{' | '}') {
+            return true;
+        }
+    }
+    quote.is_some()
+}
+
 #[cfg(test)]
 mod tests {
     use super::Theme;
@@ -568,5 +659,15 @@ mod tests {
         let second = Theme::builder().color("brand-500", "#123456").build().fingerprint();
 
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn rejects_structural_css_fragments_in_theme_values() {
+        let theme = Theme::builder().breakpoint("evil", "0px){body{color:red}").build();
+
+        let error = theme.validate().expect_err("unsafe theme values are rejected");
+
+        assert_eq!(error.namespace(), "breakpoint");
+        assert_eq!(error.key(), "evil");
     }
 }

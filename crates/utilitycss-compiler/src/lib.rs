@@ -14,7 +14,8 @@ use std::{
 use serde::Serialize;
 use utilitycss_css_ir::{CssDocument, CssSerializationMode, OrderKey};
 use utilitycss_diagnostics::{Diagnostic, DiagnosticBag, DiagnosticCode, Severity};
-use utilitycss_scanner::{scan, ExtractionMode};
+use utilitycss_scanner::{scan_checked, ExtractionMode};
+use utilitycss_span::{validate_source_len, SourceSizeError};
 use utilitycss_span::{SourceId, Span};
 use utilitycss_syntax::{parse, CandidateAstOwned, GRAMMAR_VERSION};
 use utilitycss_theme::Theme;
@@ -362,18 +363,26 @@ impl CompilerConfig {
     /// Returns a deterministic fingerprint for semantic configuration.
     #[must_use]
     pub fn fingerprint(&self) -> u64 {
-        let mut hash = self.theme.fingerprint();
+        let mut hash =
+            stable_hash_with_seed(0xcbf29ce484222325_u64, b"utilitycss-compiler-fingerprint-v2");
+        hash = stable_hash_with_seed(hash, &self.theme.fingerprint().to_le_bytes());
         for (name, definition) in self.utilities.definitions() {
-            hash = stable_hash_with_seed(hash, name.as_bytes());
-            hash = stable_hash_with_seed(hash, format!("{definition:?}").as_bytes());
+            hash = stable_hash_text(hash, name);
+            hash = stable_hash_with_seed(hash, &definition.fingerprint().to_le_bytes());
         }
         for (name, definition) in self.variants.definitions() {
-            hash = stable_hash_with_seed(hash, name.as_bytes());
-            hash = stable_hash_with_seed(hash, format!("{definition:?}").as_bytes());
+            hash = stable_hash_text(hash, name);
+            hash = stable_hash_with_seed(hash, &definition.fingerprint().to_le_bytes());
         }
-        hash = stable_hash_with_seed(hash, format!("{:?}", self.serialization_mode).as_bytes());
-        hash = stable_hash_with_seed(hash, self.preset.as_bytes());
-        stable_hash_with_seed(hash, self.browser_target.as_str().as_bytes())
+        hash = stable_hash_text(
+            hash,
+            match self.serialization_mode {
+                CssSerializationMode::Pretty => "pretty",
+                CssSerializationMode::Minified => "minified",
+            },
+        );
+        hash = stable_hash_text(hash, &self.preset);
+        stable_hash_text(hash, self.browser_target.as_str())
     }
 }
 
@@ -537,6 +546,11 @@ impl CandidateInput {
 pub enum CompilerError {
     /// The source identity was empty and could not support stable indexing.
     EmptySourceId,
+    /// The source is larger than the 32-bit source-location model can represent.
+    SourceTooLarge {
+        /// Rejected source length in bytes.
+        length: usize,
+    },
     /// An extractor supplied a span that does not exactly match its candidate text.
     InvalidCandidateSpan {
         /// Candidate text supplied by the extractor.
@@ -550,6 +564,9 @@ impl fmt::Display for CompilerError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EmptySourceId => formatter.write_str("source identity must not be empty"),
+            Self::SourceTooLarge { length } => {
+                write!(formatter, "{length} bytes: source is too large for 32-bit source locations")
+            }
             Self::InvalidCandidateSpan { raw, span } => write!(
                 formatter,
                 "candidate `{raw}` does not match source span {}..{}",
@@ -691,6 +708,7 @@ impl Compiler {
         if source.id().as_str().is_empty() {
             return Err(CompilerError::EmptySourceId);
         }
+        validate_source_len(source.content().len()).map_err(source_size_error)?;
         let source_id = source.id().clone();
         if let Some(previous) = self.sources.get(&source_id) {
             if previous.content() == source.content() {
@@ -699,7 +717,8 @@ impl Compiler {
             }
         }
 
-        let tokens = scan(source.content())
+        let tokens = scan_checked(source.content())
+            .map_err(source_size_error)?
             .into_iter()
             .map(|token| CandidateInput::new(token.raw(), token.span()))
             .collect::<Vec<_>>();
@@ -721,6 +740,7 @@ impl Compiler {
         if source.id().as_str().is_empty() {
             return Err(CompilerError::EmptySourceId);
         }
+        validate_source_len(source.content().len()).map_err(source_size_error)?;
         let source_id = source.id().clone();
 
         let mut new_candidates: BTreeMap<String, Vec<Span>> = BTreeMap::new();
@@ -1569,6 +1589,10 @@ impl Compiler {
     }
 }
 
+fn source_size_error(error: SourceSizeError) -> CompilerError {
+    CompilerError::SourceTooLarge { length: error.length() }
+}
+
 fn compile_candidate(raw: &str, config: &CompilerConfig) -> CandidateCacheEntry {
     let diagnostic_source = SourceId::new("");
     let diagnostic_span = Span::empty(0);
@@ -1680,6 +1704,12 @@ fn stable_hash_with_seed(seed: u64, bytes: &[u8]) -> u64 {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     hash
+}
+
+fn stable_hash_text(seed: u64, value: &str) -> u64 {
+    let hash =
+        stable_hash_with_seed(seed, &u64::try_from(value.len()).unwrap_or(u64::MAX).to_le_bytes());
+    stable_hash_with_seed(hash, value.as_bytes())
 }
 
 fn diagnostic_to_explain(diagnostic: &Diagnostic) -> ExplainDiagnostic {

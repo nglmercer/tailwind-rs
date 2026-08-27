@@ -6,12 +6,25 @@ export interface WasmCompilerConstructor {
 /** The generated WASM compiler methods consumed by this wrapper. */
 export interface WasmCompiler {
   updateSource(id: string, content: string): void;
+  updateSourceWithCandidates(
+    id: string,
+    content: string,
+    candidates: readonly CandidateInput[]
+  ): void;
   removeSource(id: string): boolean;
   build(): string;
   explain(candidate: string): Readonly<Record<string, unknown>>;
   validate(candidate: string): Readonly<Record<string, unknown>>;
   capabilities(): string;
   transformStylesheet(id: string, content: string): StylesheetResult;
+}
+
+/** A host-selected candidate span accepted by the WASM compiler. */
+export interface CandidateInput {
+  readonly raw: string;
+  readonly start: number;
+  readonly end: number;
+  readonly extractionMode?: "text" | "static" | "ast" | "hybrid";
 }
 
 /** A normalized stylesheet transformation result from WASM. */

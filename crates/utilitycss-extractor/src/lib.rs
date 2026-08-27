@@ -3,16 +3,17 @@
 //! This crate narrows the language-agnostic scanner to contexts where a candidate is statically
 //! visible: quoted `class`/`className` attributes and string literals inside known class helpers.
 //! It does not evaluate user code. A future AST adapter can feed the same candidate spans into the
-//! compiler without changing utility or variant semantics.
+//! compiler without changing utility or variant semantics. Helper names are convention-based when
+//! no host AST is available; AST-capable adapters should resolve bindings when possible.
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
-use std::{collections::BTreeSet, ops::Range, sync::OnceLock};
+use std::{collections::BTreeSet, error::Error, fmt, ops::Range, sync::OnceLock};
 
 use regex::Regex;
-use utilitycss_scanner::{scan, ExtractionMode};
-use utilitycss_span::Span;
+use utilitycss_scanner::{scan, scan_checked, ExtractionMode};
+use utilitycss_span::{validate_source_len, SourceSizeError, Span};
 
 /// Framework syntax that can be statically extracted without evaluating application code.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -35,6 +36,30 @@ pub struct ExtractedCandidate<'source> {
     span: Span,
     mode: ExtractionMode,
 }
+
+/// An extraction mode that cannot be fulfilled by this language-agnostic crate.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExtractionError {
+    /// AST extraction must be performed by a host-language adapter such as the SWC extractor.
+    AstRequiresHostExtractor,
+    /// The source is larger than the 32-bit source-location model can represent.
+    SourceTooLarge,
+}
+
+impl fmt::Display for ExtractionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::AstRequiresHostExtractor => formatter.write_str(
+                "AST extraction requires a host-language extractor; use utilitycss-swc or supply candidates directly",
+            ),
+            Self::SourceTooLarge => formatter.write_str(
+                "source is too large for the compiler's 32-bit source-location model",
+            ),
+        }
+    }
+}
+
+impl Error for ExtractionError {}
 
 impl<'source> ExtractedCandidate<'source> {
     /// Creates an extracted candidate from source text and a validated span.
@@ -69,27 +94,26 @@ impl<'source> ExtractedCandidate<'source> {
 }
 
 /// Extracts candidates using an explicit source-discovery mode.
-#[must_use]
 pub fn extract_with_mode(
     source: &str,
     mode: ExtractionMode,
     framework: Framework,
-) -> Vec<ExtractedCandidate<'_>> {
+) -> Result<Vec<ExtractedCandidate<'_>>, ExtractionError> {
+    validate_source_len(source.len())
+        .map_err(|_: SourceSizeError| ExtractionError::SourceTooLarge)?;
     match mode {
-        ExtractionMode::Text => scan(source)
+        ExtractionMode::Text => Ok(scan_checked(source)
+            .map_err(|_: SourceSizeError| ExtractionError::SourceTooLarge)?
             .into_iter()
             .map(|token| ExtractedCandidate::with_mode(token.raw(), token.span(), mode))
-            .collect(),
-        ExtractionMode::Static => extract_for_framework(source, framework)
+            .collect()),
+        ExtractionMode::Static => Ok(extract_for_framework(source, framework)
             .into_iter()
             .map(|candidate| ExtractedCandidate::with_mode(candidate.raw(), candidate.span(), mode))
-            .collect(),
-        ExtractionMode::Ast => extract_for_framework(source, framework)
-            .into_iter()
-            .map(|candidate| ExtractedCandidate::with_mode(candidate.raw(), candidate.span(), mode))
-            .collect(),
+            .collect()),
+        ExtractionMode::Ast => Err(ExtractionError::AstRequiresHostExtractor),
         ExtractionMode::Hybrid => {
-            let mut candidates = extract_with_mode(source, ExtractionMode::Static, framework)
+            let mut candidates = extract_with_mode(source, ExtractionMode::Static, framework)?
                 .into_iter()
                 .map(|candidate| {
                     ExtractedCandidate::with_mode(candidate.raw(), candidate.span(), mode)
@@ -97,7 +121,7 @@ pub fn extract_with_mode(
                 .collect::<Vec<_>>();
             let mut seen =
                 candidates.iter().map(|candidate| candidate.span()).collect::<BTreeSet<_>>();
-            for candidate in extract_with_mode(source, ExtractionMode::Text, framework) {
+            for candidate in extract_with_mode(source, ExtractionMode::Text, framework)? {
                 if seen.insert(candidate.span()) {
                     candidates.push(ExtractedCandidate::with_mode(
                         candidate.raw(),
@@ -107,7 +131,7 @@ pub fn extract_with_mode(
                 }
             }
             candidates.sort_by_key(|candidate| (candidate.span().start(), candidate.span().end()));
-            candidates
+            Ok(candidates)
         }
     }
 }
@@ -118,17 +142,26 @@ pub fn extract_with_mode(
 /// unrelated string literals are intentionally ignored.
 #[must_use]
 pub fn extract(source: &str) -> Vec<ExtractedCandidate<'_>> {
+    if validate_source_len(source.len()).is_err() {
+        return Vec::new();
+    }
     let mut ranges = attribute_ranges(source);
     ranges.extend(helper_string_ranges(source));
+    normalize_ranges(&mut ranges);
     let comments = comment_ranges(source.as_bytes());
+    let mut comments = comments;
+    normalize_ranges(&mut comments);
+    let mut range_index = 0;
+    let mut comment_index = 0;
 
     scan(source)
         .into_iter()
         .filter(|token| {
             let start = usize::try_from(token.span().start()).unwrap_or(usize::MAX);
             let end = usize::try_from(token.span().end()).unwrap_or(usize::MAX);
-            !comments.iter().any(|comment| comment.start <= start && end <= comment.end)
-                && ranges.iter().any(|range| range.start <= start && end <= range.end)
+            let candidate = start..end;
+            !contains_ordered_range(&comments, &mut comment_index, &candidate)
+                && contains_ordered_range(&ranges, &mut range_index, &candidate)
         })
         .map(|token| ExtractedCandidate::new(token.raw(), token.span()))
         .collect()
@@ -141,6 +174,9 @@ pub fn extract(source: &str) -> Vec<ExtractedCandidate<'_>> {
 /// only source literals and directive names are returned.
 #[must_use]
 pub fn extract_for_framework(source: &str, framework: Framework) -> Vec<ExtractedCandidate<'_>> {
+    if validate_source_len(source.len()).is_err() {
+        return Vec::new();
+    }
     let mut candidates = extract(source);
     let ranges = match framework {
         Framework::Html => Vec::new(),
@@ -153,9 +189,13 @@ pub fn extract_for_framework(source: &str, framework: Framework) -> Vec<Extracte
         .map(|candidate| (candidate.span(), candidate.raw()))
         .collect::<BTreeSet<_>>();
     let mut seen = existing;
-    let comments = comment_ranges(source.as_bytes());
+    let mut ranges = ranges;
+    normalize_ranges(&mut ranges);
+    let mut comments = comment_ranges(source.as_bytes());
+    normalize_ranges(&mut comments);
+    let mut comment_index = 0;
     for range in ranges {
-        if comments.iter().any(|comment| comment.start <= range.start && range.end <= comment.end) {
+        if contains_ordered_range(&comments, &mut comment_index, &range) {
             continue;
         }
         let Some(region) = source.get(range.clone()) else {
@@ -173,10 +213,11 @@ pub fn extract_for_framework(source: &str, framework: Framework) -> Vec<Extracte
             let Some(raw) = source.get(start..end) else {
                 continue;
             };
-            let Some(span) = Span::new(
-                u32::try_from(start).unwrap_or(u32::MAX),
-                u32::try_from(end).unwrap_or(u32::MAX),
-            ) else {
+            let (Some(start), Some(end)) = (u32::try_from(start).ok(), u32::try_from(end).ok())
+            else {
+                continue;
+            };
+            let Some(span) = Span::new(start, end) else {
                 continue;
             };
             if seen.insert((span, raw)) {
@@ -186,6 +227,34 @@ pub fn extract_for_framework(source: &str, framework: Framework) -> Vec<Extracte
     }
     candidates.sort_by_key(|candidate| (candidate.span().start(), candidate.span().end()));
     candidates
+}
+
+fn normalize_ranges(ranges: &mut Vec<Range<usize>>) {
+    ranges.sort_unstable_by_key(|range| (range.start, range.end));
+    let mut merged: Vec<Range<usize>> = Vec::with_capacity(ranges.len());
+    for range in ranges.drain(..) {
+        if let Some(previous) = merged.last_mut() {
+            if range.start <= previous.end {
+                previous.end = previous.end.max(range.end);
+                continue;
+            }
+        }
+        merged.push(range);
+    }
+    *ranges = merged;
+}
+
+fn contains_ordered_range(
+    ranges: &[Range<usize>],
+    index: &mut usize,
+    candidate: &Range<usize>,
+) -> bool {
+    while ranges.get(*index).is_some_and(|range| range.end <= candidate.start) {
+        *index += 1;
+    }
+    ranges
+        .get(*index)
+        .is_some_and(|range| range.start <= candidate.start && candidate.end <= range.end)
 }
 
 fn vue_ranges(source: &str) -> Vec<Range<usize>> {
@@ -291,7 +360,43 @@ fn attribute_ranges(source: &str) -> Vec<Range<usize>> {
     let names = [b"class".as_slice(), b"className", b"class:list", b"classList"];
     let mut ranges = Vec::new();
     let mut cursor = 0;
+    let mut in_tag = false;
+    let mut quote = None;
+    let mut escaped = false;
     while cursor < bytes.len() {
+        let byte = bytes[cursor];
+        if let Some(active_quote) = quote {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == active_quote {
+                quote = None;
+            }
+            cursor += 1;
+            continue;
+        }
+        if in_tag && matches!(byte, b'\'' | b'"') {
+            quote = Some(byte);
+            cursor += 1;
+            continue;
+        }
+        if !in_tag {
+            if byte == b'<'
+                && bytes
+                    .get(cursor + 1)
+                    .is_some_and(|next| next.is_ascii_alphabetic() || *next == b'/')
+            {
+                in_tag = true;
+            }
+            cursor += 1;
+            continue;
+        }
+        if byte == b'>' {
+            in_tag = false;
+            cursor += 1;
+            continue;
+        }
         let Some(name) = names.iter().find(|name| starts_with_name(bytes, cursor, name)) else {
             cursor += 1;
             continue;
@@ -327,16 +432,21 @@ fn attribute_ranges(source: &str) -> Vec<Range<usize>> {
 
 fn helper_string_ranges(source: &str) -> Vec<Range<usize>> {
     let bytes = source.as_bytes();
-    let helpers = [b"clsx".as_slice(), b"classnames", b"cn", b"cva", b"tv", b"twJoin", b"twMerge"];
+    let helpers = ["clsx", "classnames", "cn", "cva", "tv", "twJoin", "twMerge"];
+    let shadowed_helpers = declared_helpers(source);
     let mut ranges = Vec::new();
     let mut cursor = 0;
     while cursor < bytes.len() {
         let Some(helper) =
-            helpers.iter().find(|helper| starts_with_identifier(bytes, cursor, helper))
+            helpers.iter().find(|helper| starts_with_identifier(bytes, cursor, helper.as_bytes()))
         else {
             cursor += 1;
             continue;
         };
+        if shadowed_helpers.contains(*helper) {
+            cursor += helper.len();
+            continue;
+        }
         let mut open = cursor + helper.len();
         while open < bytes.len() && bytes[open].is_ascii_whitespace() {
             open += 1;
@@ -353,6 +463,31 @@ fn helper_string_ranges(source: &str) -> Vec<Range<usize>> {
         cursor = close.saturating_add(1);
     }
     ranges
+}
+
+fn declared_helpers(source: &str) -> BTreeSet<String> {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    let regex = REGEX.get_or_init(|| {
+        Regex::new(
+            r"(?x)\b(?:function|class)\s+(clsx|classnames|cn|cva|tv|twJoin|twMerge)\b
+                |\b(?:const|let|var)\s+(clsx|classnames|cn|cva|tv|twJoin|twMerge)\b",
+        )
+        .expect("valid helper declaration regex")
+    });
+    let mut comments = comment_ranges(source.as_bytes());
+    normalize_ranges(&mut comments);
+    let mut comment_index = 0;
+    regex
+        .captures_iter(source)
+        .filter_map(|captures| {
+            let whole = captures.get(0)?;
+            let whole_range = whole.start()..whole.end();
+            if contains_ordered_range(&comments, &mut comment_index, &whole_range) {
+                return None;
+            }
+            (1..=3).find_map(|index| captures.get(index).map(|name| name.as_str().to_owned()))
+        })
+        .collect()
 }
 
 fn string_ranges(bytes: &[u8], start: usize, end: usize) -> Vec<Range<usize>> {
@@ -619,8 +754,31 @@ mod tests {
             r#"<div class="p-4"> const value = "text-red-500";"#,
             ExtractionMode::Hybrid,
             Framework::Html,
-        );
+        )
+        .expect("hybrid extraction is supported");
         assert!(!candidates.is_empty());
         assert!(candidates.iter().all(|candidate| candidate.mode() == ExtractionMode::Hybrid));
+    }
+
+    #[test]
+    fn ast_mode_requires_a_host_language_extractor() {
+        let error = extract_with_mode("<div class=\"flex\">", ExtractionMode::Ast, Framework::Html)
+            .expect_err("the generic extractor cannot provide AST semantics");
+
+        assert_eq!(error, super::ExtractionError::AstRequiresHostExtractor);
+    }
+
+    #[test]
+    fn ignores_class_attribute_lookalikes_in_script_text() {
+        let source = r#"const className = "flex"; const title = "p-4";"#;
+
+        assert!(extract(source).is_empty());
+    }
+
+    #[test]
+    fn avoids_obvious_shadowed_text_helper_bindings() {
+        let source = r#"function cn(value) { return value; } cn("flex");"#;
+
+        assert!(extract(source).is_empty());
     }
 }

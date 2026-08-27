@@ -3,10 +3,11 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
-use serde::Serialize;
-use utilitycss_compiler::{Compiler, CompilerConfig, SourceInput};
+use serde::{Deserialize, Serialize};
+use utilitycss_compiler::{CandidateInput, Compiler, CompilerConfig, SourceInput};
 use utilitycss_css_ir::CssSerializationMode;
-use utilitycss_span::SourceId;
+use utilitycss_scanner::ExtractionMode;
+use utilitycss_span::{SourceId, Span};
 use utilitycss_stylesheet::{transform_stylesheet, StylesheetInput};
 use wasm_bindgen::prelude::*;
 
@@ -35,6 +36,15 @@ struct WasmStylesheetResult {
     diagnostics: Vec<WasmDiagnostic>,
 }
 
+#[derive(Deserialize)]
+struct WasmCandidateInput {
+    raw: String,
+    start: u32,
+    end: u32,
+    #[serde(default, rename = "extractionMode")]
+    extraction_mode: Option<String>,
+}
+
 #[wasm_bindgen]
 impl WasmCompiler {
     /// Creates a compiler, optionally selecting readable CSS output.
@@ -45,10 +55,46 @@ impl WasmCompiler {
         Self { inner: Compiler::new(CompilerConfig::new().with_serialization_mode(mode)) }
     }
 
-    /// Inserts or replaces one source unit.
+    /// Inserts or replaces one source unit using the language-agnostic scanner.
+    ///
+    /// This is intentionally a raw scanner surface. Host applications that can parse their
+    /// source language should use [`Self::update_source_with_candidates`] to preserve the same
+    /// candidate-selection semantics as the native AST adapters.
     pub fn update_source(&mut self, id: String, content: String) -> Result<(), JsValue> {
         self.inner
             .update_source(SourceInput::new(SourceId::new(id), content))
+            .map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
+    /// Inserts or replaces one source unit using host-selected candidate spans.
+    ///
+    /// Each item must contain `raw`, `start`, and `end` fields. `extractionMode` is optional and
+    /// defaults to `text`; accepted values are `text`, `static`, `ast`, and `hybrid`.
+    #[wasm_bindgen(js_name = updateSourceWithCandidates)]
+    pub fn update_source_with_candidates(
+        &mut self,
+        id: String,
+        content: String,
+        candidates: JsValue,
+    ) -> Result<(), JsValue> {
+        let inputs = serde_wasm_bindgen::from_value::<Vec<WasmCandidateInput>>(candidates)
+            .map_err(|error| JsValue::from_str(&format!("invalid candidate list: {error}")))?
+            .into_iter()
+            .map(|candidate| {
+                let span = Span::new(candidate.start, candidate.end)
+                    .ok_or_else(|| "candidate start must not exceed candidate end".to_owned())?;
+                let mode = candidate
+                    .extraction_mode
+                    .as_deref()
+                    .map_or(Some(ExtractionMode::Text), ExtractionMode::parse)
+                    .ok_or_else(|| "unknown candidate extraction mode".to_owned())?;
+                Ok(CandidateInput::new(candidate.raw, span).with_extraction_mode(mode))
+            })
+            .collect::<Result<Vec<_>, String>>()
+            .map_err(|error| JsValue::from_str(&error))?;
+
+        self.inner
+            .update_source_with_candidates(SourceInput::new(SourceId::new(id), content), inputs)
             .map_err(|error| JsValue::from_str(&error.to_string()))
     }
 

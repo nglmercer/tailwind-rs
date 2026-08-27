@@ -4,6 +4,7 @@ use std::hint::black_box;
 use std::time::Instant;
 
 use utilitycss_compiler::{Compiler, CompilerConfig, SourceInput};
+use utilitycss_extractor::{extract_for_framework, Framework};
 use utilitycss_scanner::scan;
 use utilitycss_span::{SourceId, Span};
 use utilitycss_stylesheet::{transform_stylesheet, StylesheetInput};
@@ -15,10 +16,31 @@ fn main() {
 
     benchmark_spans(ITERATIONS);
     benchmark_scan_and_parse(ITERATIONS);
+    benchmark_static_extraction(ITERATIONS / 100);
     benchmark_swc_extraction(ITERATIONS / 10);
     benchmark_compiler(ITERATIONS / 100);
     benchmark_introspection(ITERATIONS / 100);
     benchmark_stylesheet();
+}
+
+fn benchmark_static_extraction(iterations: u32) {
+    let source = (0..2_000)
+        .map(|index| {
+            format!(
+                "<!-- comment-{index} class=\"ignored-{index}\" --> <div class=\"flex p-{index}\" data-id=\"{index}\"></div>"
+            )
+        })
+        .collect::<String>();
+    let started = Instant::now();
+    let mut extracted = 0_u64;
+    for _ in 0..iterations {
+        extracted = extracted
+            .wrapping_add(extract_for_framework(black_box(&source), Framework::Html).len() as u64);
+    }
+    println!(
+        "static extraction: {iterations} iterations over 2,000 attributes/comments in {:?} (candidates={extracted})",
+        started.elapsed()
+    );
 }
 
 fn benchmark_swc_extraction(iterations: u32) {

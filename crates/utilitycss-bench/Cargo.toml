@@ -11,6 +11,7 @@ readme.workspace = true
 
 [dependencies]
 utilitycss-compiler = { version = "0.1.0", path = "../utilitycss-compiler" }
+utilitycss-extractor = { version = "0.1.0", path = "../utilitycss-extractor" }
 utilitycss-scanner = { version = "0.1.0", path = "../utilitycss-scanner" }
 utilitycss-span = { version = "0.1.0", path = "../utilitycss-span" }
 utilitycss-syntax = { version = "0.1.0", path = "../utilitycss-syntax" }

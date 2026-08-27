@@ -1789,6 +1789,7 @@ name = "utilitycss-bench"
 version = "0.1.0"
 dependencies = [
  "utilitycss-compiler",
+ "utilitycss-extractor",
  "utilitycss-scanner",
  "utilitycss-span",
  "utilitycss-stylesheet",
@@ -2022,6 +2023,7 @@ dependencies = [
  "serde-wasm-bindgen",
  "utilitycss-compiler",
  "utilitycss-css-ir",
+ "utilitycss-scanner",
  "utilitycss-span",
  "utilitycss-stylesheet",
  "wasm-bindgen",

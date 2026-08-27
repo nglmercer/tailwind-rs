@@ -13,7 +13,7 @@ use utilitycss_css_ir::{BrowserTarget, CssSerializationMode};
 use utilitycss_diagnostics::Severity;
 use utilitycss_extractor::{extract_for_framework, Framework};
 use utilitycss_scanner::ExtractionMode;
-use utilitycss_span::{SourceId, Span};
+use utilitycss_span::{validate_source_len, SourceId, Span};
 use utilitycss_stylesheet::{transform_stylesheet, StylesheetInput};
 use utilitycss_swc::{extract as extract_swc, SourceKind as SwcSourceKind};
 
@@ -57,21 +57,21 @@ pub struct JsCandidate {
 #[napi(object)]
 pub struct JsStats {
     /// Number of source units scanned on updates.
-    pub sources_scanned: u32,
+    pub sources_scanned: f64,
     /// Number of source bytes scanned on updates.
-    pub bytes_scanned: u32,
+    pub bytes_scanned: f64,
     /// Number of candidate occurrences found on updates.
-    pub candidates_found: u32,
+    pub candidates_found: f64,
     /// Number of unique active candidates.
-    pub unique_candidates: u32,
+    pub unique_candidates: f64,
     /// Number of candidates parsed on this build.
-    pub candidates_parsed: u32,
+    pub candidates_parsed: f64,
     /// Number of active candidates served from cache.
-    pub cache_hits: u32,
+    pub cache_hits: f64,
     /// Number of active rules emitted.
-    pub rules_generated: u32,
+    pub rules_generated: f64,
     /// Number of rules removed from active references.
-    pub rules_removed: u32,
+    pub rules_removed: f64,
 }
 
 /// A compiler build result returned to JavaScript.
@@ -197,6 +197,8 @@ impl Compiler {
         content: String,
         path: Option<String>,
     ) -> Result<Vec<JsCandidate>> {
+        validate_source_len(content.len())
+            .map_err(|error| Error::new(Status::InvalidArg, error.to_string()))?;
         let candidates = match source_kind(path.as_deref()) {
             SourceKind::JavaScript(kind) => extract_swc(&content, kind)
                 .map_err(|error| Error::new(Status::InvalidArg, error.to_string()))?
@@ -235,14 +237,14 @@ impl Compiler {
             css: output.css().to_owned(),
             diagnostics,
             stats: JsStats {
-                sources_scanned: saturating_u32(stats.sources_scanned()),
-                bytes_scanned: saturating_u32(stats.bytes_scanned()),
-                candidates_found: saturating_u32(stats.candidates_found()),
-                unique_candidates: saturating_u32(stats.unique_candidates()),
-                candidates_parsed: saturating_u32(stats.candidates_parsed()),
-                cache_hits: saturating_u32(stats.cache_hits()),
-                rules_generated: saturating_u32(stats.rules_generated()),
-                rules_removed: saturating_u32(stats.rules_removed()),
+                sources_scanned: stats_number(stats.sources_scanned()),
+                bytes_scanned: stats_number(stats.bytes_scanned()),
+                candidates_found: stats_number(stats.candidates_found()),
+                unique_candidates: stats_number(stats.unique_candidates()),
+                candidates_parsed: stats_number(stats.candidates_parsed()),
+                cache_hits: stats_number(stats.cache_hits()),
+                rules_generated: stats_number(stats.rules_generated()),
+                rules_removed: stats_number(stats.rules_removed()),
             },
         }
     }
@@ -319,8 +321,8 @@ fn parse_config_source(source: &str) -> Result<ConfigFile> {
     result.map_err(|error| Error::new(Status::InvalidArg, error.to_string()))
 }
 
-fn saturating_u32(value: usize) -> u32 {
-    u32::try_from(value).unwrap_or(u32::MAX)
+fn stats_number(value: usize) -> f64 {
+    value as f64
 }
 
 enum SourceKind {

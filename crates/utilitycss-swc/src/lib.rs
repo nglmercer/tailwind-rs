@@ -7,14 +7,17 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
-use std::fmt;
+use std::{collections::BTreeSet, fmt};
 
 use swc_common::{sync::Lrc, BytePos, FileName, SourceMap, Span as SwcSpan, Spanned};
-use swc_ecma_ast::{CallExpr, Callee, Expr, JSXAttr, JSXAttrName, JSXAttrValue, Str, Tpl};
+use swc_ecma_ast::{
+    CallExpr, Callee, ClassDecl, Expr, FnDecl, ImportDecl, ImportSpecifier, JSXAttr, JSXAttrName,
+    JSXAttrValue, Pat, Str, Tpl, VarDeclarator,
+};
 use swc_ecma_parser::{lexer::Lexer, EsSyntax, Parser, StringInput, Syntax, TsSyntax};
 use swc_ecma_visit::{Visit, VisitWith};
-use utilitycss_scanner::scan;
-use utilitycss_span::Span;
+use utilitycss_scanner::scan_checked;
+use utilitycss_span::{validate_source_len, SourceSizeError, Span};
 
 /// The source grammar used when parsing a source unit.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -75,6 +78,8 @@ pub enum ExtractionErrorKind {
     Parse,
     /// A parser span could not be mapped back to the supplied UTF-8 source.
     InvalidSpan,
+    /// The source is larger than the 32-bit source-location model can represent.
+    SourceTooLarge,
 }
 
 /// A typed extraction error that is safe to expose across adapter boundaries.
@@ -96,6 +101,10 @@ impl ExtractionError {
             message: "SWC returned a span outside the supplied source".to_owned(),
             offset,
         }
+    }
+
+    fn source_too_large(error: SourceSizeError) -> Self {
+        Self { kind: ExtractionErrorKind::SourceTooLarge, message: error.to_string(), offset: None }
     }
 
     /// Returns the structured error kind.
@@ -138,6 +147,7 @@ pub fn extract(
     source: &str,
     source_kind: SourceKind,
 ) -> Result<Vec<ExtractedCandidate<'_>>, ExtractionError> {
+    validate_source_len(source.len()).map_err(ExtractionError::source_too_large)?;
     let source_map: Lrc<SourceMap> = Default::default();
     let file = source_map
         .new_source_file(FileName::Custom("utilitycss-input".to_owned()).into(), source.to_owned());
@@ -159,7 +169,10 @@ pub fn extract(
         ));
     }
 
-    let mut visitor = CandidateVisitor::new(source, base);
+    let mut bindings = BindingCollector::default();
+    program.visit_with(&mut bindings);
+    let mut visitor =
+        CandidateVisitor::new(source, base, bindings.helper_aliases, bindings.shadowed_helpers);
     program.visit_with(&mut visitor);
     visitor.finish()
 }
@@ -173,17 +186,26 @@ struct CandidateVisitor<'source> {
     base: BytePos,
     helper_depth: usize,
     dynamic_template_depth: usize,
+    helper_aliases: BTreeSet<String>,
+    shadowed_helpers: BTreeSet<String>,
     candidates: Vec<ExtractedCandidate<'source>>,
     error: Option<ExtractionError>,
 }
 
 impl<'source> CandidateVisitor<'source> {
-    fn new(source: &'source str, base: BytePos) -> Self {
+    fn new(
+        source: &'source str,
+        base: BytePos,
+        helper_aliases: BTreeSet<String>,
+        shadowed_helpers: BTreeSet<String>,
+    ) -> Self {
         Self {
             source,
             base,
             helper_depth: 0,
             dynamic_template_depth: 0,
+            helper_aliases,
+            shadowed_helpers,
             candidates: Vec::new(),
             error: None,
         }
@@ -201,17 +223,16 @@ impl<'source> CandidateVisitor<'source> {
         matches!(name, JSXAttrName::Ident(name) if matches!(name.sym.as_ref(), "class" | "className"))
     }
 
-    fn is_helper(call: &CallExpr) -> bool {
+    fn is_helper(&self, call: &CallExpr) -> bool {
         let Callee::Expr(callee) = &call.callee else {
             return false;
         };
         let Expr::Ident(identifier) = callee.as_ref() else {
             return false;
         };
-        matches!(
-            identifier.sym.as_ref(),
-            "clsx" | "classnames" | "cn" | "cva" | "tv" | "twJoin" | "twMerge"
-        )
+        let name = identifier.sym.as_ref();
+        (is_known_helper(name) || self.helper_aliases.contains(name))
+            && !self.shadowed_helpers.contains(name)
     }
 
     fn add_literal(&mut self, span: SwcSpan) -> Result<(), ExtractionError> {
@@ -231,7 +252,7 @@ impl<'source> CandidateVisitor<'source> {
             .source
             .get(start..end)
             .ok_or_else(|| ExtractionError::invalid_span(u32::try_from(start).ok()))?;
-        for token in scan(region) {
+        for token in scan_checked(region).map_err(ExtractionError::source_too_large)? {
             let local_start = usize::try_from(token.span().start())
                 .map_err(|_| ExtractionError::invalid_span(u32::try_from(start).ok()))?;
             let local_end = usize::try_from(token.span().end())
@@ -276,9 +297,64 @@ impl<'source> CandidateVisitor<'source> {
     }
 }
 
+#[derive(Default)]
+struct BindingCollector {
+    helper_aliases: BTreeSet<String>,
+    shadowed_helpers: BTreeSet<String>,
+}
+
+impl BindingCollector {
+    fn add(&mut self, name: &str) {
+        if is_known_helper(name) {
+            self.shadowed_helpers.insert(name.to_owned());
+        }
+    }
+}
+
+impl Visit for BindingCollector {
+    fn visit_import_decl(&mut self, node: &ImportDecl) {
+        for specifier in &node.specifiers {
+            let ImportSpecifier::Named(named) = specifier else {
+                continue;
+            };
+            if node.type_only || named.is_type_only {
+                continue;
+            }
+            let Some(imported) = named.imported.as_ref() else {
+                continue;
+            };
+            let imported = imported.atom().to_string();
+            if is_known_helper(&imported) {
+                self.helper_aliases.insert(named.local.sym.to_string());
+            }
+        }
+    }
+
+    fn visit_var_declarator(&mut self, node: &VarDeclarator) {
+        if let Pat::Ident(binding) = &node.name {
+            self.add(binding.id.sym.as_ref());
+        }
+        node.visit_children_with(self);
+    }
+
+    fn visit_fn_decl(&mut self, node: &FnDecl) {
+        self.add(node.ident.sym.as_ref());
+        node.visit_children_with(self);
+    }
+
+    fn visit_class_decl(&mut self, node: &ClassDecl) {
+        self.add(node.ident.sym.as_ref());
+        node.visit_children_with(self);
+    }
+}
+
+fn is_known_helper(name: &str) -> bool {
+    matches!(name, "clsx" | "classnames" | "cn" | "cva" | "tv" | "twJoin" | "twMerge")
+}
+
 impl Visit for CandidateVisitor<'_> {
     fn visit_call_expr(&mut self, node: &CallExpr) {
-        if Self::is_helper(node) {
+        if self.is_helper(node) {
             self.helper_depth = self.helper_depth.saturating_add(1);
             node.visit_children_with(self);
             self.helper_depth = self.helper_depth.saturating_sub(1);
@@ -395,6 +471,26 @@ mod tests {
         "#;
 
         assert_eq!(raws(source, SourceKind::JavaScript), vec!["p-8"]);
+    }
+
+    #[test]
+    fn does_not_treat_shadowed_helper_names_as_class_helpers() {
+        let source = r#"
+            function cn(value) { return encrypt(value); }
+            cn("flex");
+        "#;
+
+        assert!(extract(source, SourceKind::JavaScript).expect("source parses").is_empty());
+    }
+
+    #[test]
+    fn preserves_imported_helper_names() {
+        let source = r#"
+            import { cn as cx } from "./styles";
+            cx("flex");
+        "#;
+
+        assert_eq!(raws(source, SourceKind::JavaScript), vec!["flex"]);
     }
 
     #[test]

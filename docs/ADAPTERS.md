@@ -108,6 +108,11 @@ Preferred options:
 
 Avoid making Deno support dependent on Node globals.
 
+The WASM `updateSource` method is intentionally a language-agnostic scanner surface. Hosts that
+already parse JavaScript-family or framework source SHOULD call the generated
+`updateSourceWithCandidates` method with exact source spans; this keeps WASM candidate selection
+aligned with the native AST/framework adapters.
+
 ## Vite
 
 The Vite adapter should:

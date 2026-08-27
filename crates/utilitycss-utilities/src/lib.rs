@@ -1042,6 +1042,97 @@ impl UtilityDefinition {
         Self::Functional { property: property.into(), namespace, required, negative, order }
     }
 
+    /// Returns a canonical semantic fingerprint for this definition.
+    ///
+    /// The representation is deliberately version-independent of Rust's formatting traits. Field
+    /// tags, lengths, enum names, and values are encoded in the order defined by this method.
+    #[must_use]
+    pub fn fingerprint(&self) -> u64 {
+        let mut hash = 0xcbf29ce484222325_u64;
+        match self {
+            Self::Static { property, value, order } => {
+                hash = hash_tag(hash, 0);
+                hash = hash_text(hash, property);
+                hash = hash_text(hash, value);
+                hash_u16(hash, *order)
+            }
+            Self::Composite { declarations, order } => {
+                hash = hash_tag(hash, 1);
+                hash = hash_usize(hash, declarations.len());
+                for (property, value) in declarations {
+                    hash = hash_text(hash, property);
+                    hash = hash_text(hash, value);
+                }
+                hash_u16(hash, *order)
+            }
+            Self::Spacing { margin, edge, order } => {
+                hash = hash_tag(hash, 2);
+                hash = hash_bool(hash, *margin);
+                hash = hash_tag(hash, spacing_edge_tag(*edge));
+                hash_u16(hash, *order)
+            }
+            Self::Gap { edge, order } => {
+                hash = hash_tag(hash, 3);
+                hash = hash_tag(hash, spacing_edge_tag(*edge));
+                hash_u16(hash, *order)
+            }
+            Self::Size { dimension, order } => {
+                hash = hash_tag(hash, 4);
+                hash = hash_tag(hash, dimension_tag(*dimension));
+                hash_u16(hash, *order)
+            }
+            Self::Color { kind, order } => {
+                hash = hash_tag(hash, 5);
+                hash = hash_tag(hash, color_kind_tag(*kind));
+                hash_u16(hash, *order)
+            }
+            Self::Radius { order } => hash_u16(hash_tag(hash, 6), *order),
+            Self::AlignItems { order } => hash_u16(hash_tag(hash, 7), *order),
+            Self::JustifyContent { order } => hash_u16(hash_tag(hash, 8), *order),
+            Self::GridColumns { order } => hash_u16(hash_tag(hash, 9), *order),
+            Self::BorderWidth { edge, order } => {
+                hash = hash_tag(hash, 10);
+                hash = hash_tag(hash, spacing_edge_tag(*edge));
+                hash_u16(hash, *order)
+            }
+            Self::RadiusEdge { edge, order } => {
+                hash = hash_tag(hash, 11);
+                hash = hash_tag(hash, spacing_edge_tag(*edge));
+                hash_u16(hash, *order)
+            }
+            Self::Space { edge, order } => {
+                hash = hash_tag(hash, 12);
+                hash = hash_tag(hash, spacing_edge_tag(*edge));
+                hash_u16(hash, *order)
+            }
+            Self::Divide { edge, order } => {
+                hash = hash_tag(hash, 13);
+                hash = hash_tag(hash, spacing_edge_tag(*edge));
+                hash_u16(hash, *order)
+            }
+            Self::SizeBoth { order } => hash_u16(hash_tag(hash, 14), *order),
+            Self::GridSpan { row, order } => {
+                hash = hash_tag(hash, 15);
+                hash = hash_bool(hash, *row);
+                hash_u16(hash, *order)
+            }
+            Self::GridLine { row, start, order } => {
+                hash = hash_tag(hash, 16);
+                hash = hash_bool(hash, *row);
+                hash = hash_bool(hash, *start);
+                hash_u16(hash, *order)
+            }
+            Self::Functional { property, namespace, required, negative, order } => {
+                hash = hash_tag(hash, 17);
+                hash = hash_text(hash, property);
+                hash = hash_text(hash, namespace.as_str());
+                hash = hash_bool(hash, *required);
+                hash = hash_bool(hash, *negative);
+                hash_u16(hash, *order)
+            }
+        }
+    }
+
     fn order(&self) -> u16 {
         match self {
             Self::Static { order, .. }
@@ -1064,6 +1155,70 @@ impl UtilityDefinition {
             | Self::Functional { order, .. } => *order,
         }
     }
+}
+
+fn hash_tag(hash: u64, tag: u8) -> u64 {
+    fnv1a(hash, &[tag])
+}
+
+fn hash_bool(hash: u64, value: bool) -> u64 {
+    hash_tag(hash, u8::from(value))
+}
+
+fn hash_u16(hash: u64, value: u16) -> u64 {
+    fnv1a(hash, &value.to_le_bytes())
+}
+
+fn hash_usize(hash: u64, value: usize) -> u64 {
+    hash_usize_bytes(hash, value)
+}
+
+fn hash_text(hash: u64, value: &str) -> u64 {
+    let hash = hash_usize_bytes(hash, value.len());
+    fnv1a(hash, value.as_bytes())
+}
+
+fn hash_usize_bytes(hash: u64, value: usize) -> u64 {
+    fnv1a(hash, &u64::try_from(value).unwrap_or(u64::MAX).to_le_bytes())
+}
+
+fn spacing_edge_tag(edge: SpacingEdge) -> u8 {
+    match edge {
+        SpacingEdge::All => 0,
+        SpacingEdge::X => 1,
+        SpacingEdge::Y => 2,
+        SpacingEdge::Top => 3,
+        SpacingEdge::Right => 4,
+        SpacingEdge::Bottom => 5,
+        SpacingEdge::Left => 6,
+    }
+}
+
+fn dimension_tag(dimension: Dimension) -> u8 {
+    match dimension {
+        Dimension::Width => 0,
+        Dimension::Height => 1,
+        Dimension::MinWidth => 2,
+        Dimension::MaxWidth => 3,
+        Dimension::MinHeight => 4,
+        Dimension::MaxHeight => 5,
+    }
+}
+
+fn color_kind_tag(kind: ColorKind) -> u8 {
+    match kind {
+        ColorKind::Background => 0,
+        ColorKind::Text => 1,
+        ColorKind::Border => 2,
+    }
+}
+
+fn fnv1a(mut hash: u64, bytes: &[u8]) -> u64 {
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 /// Built-in utility definitions indexed by family.
@@ -2175,13 +2330,16 @@ pub fn resolve(
                     value_text,
                 ));
             }
-            let value = utility.value().map_or_else(
-                || theme.radius("DEFAULT").map(str::to_owned),
-                |value| radius_value(value, theme, family).ok(),
-            );
-            let value = value.ok_or_else(|| {
-                UtilityError::new(UtilityErrorKind::UnknownThemeValue, family, value_text)
-            })?;
+            let value = match utility.value() {
+                Some(value) => radius_value(value, theme, family)?,
+                None => theme
+                    .radius("DEFAULT")
+                    .map(|value| validated_theme_value(value, family))
+                    .transpose()?
+                    .ok_or_else(|| {
+                        UtilityError::new(UtilityErrorKind::UnknownThemeValue, family, value_text)
+                    })?,
+            };
             resolved_value = Some(ResolvedValue::Length(value.clone()));
             vec![CssDeclaration::new("border-radius", value).with_important(important)]
         }
@@ -2930,10 +3088,39 @@ fn unsafe_css_fragment(content: &str) -> bool {
         .as_bytes()
         .windows(b"</style".len())
         .any(|window| window.eq_ignore_ascii_case(b"</style"));
-    content.chars().any(|character| character.is_control() || matches!(character, ';' | '{' | '}'))
-        || content.contains("/*")
-        || content.contains("*/")
-        || contains_style_close
+    if contains_style_close {
+        return true;
+    }
+    let mut quote = None;
+    let mut escaped = false;
+    for (offset, character) in content.char_indices() {
+        if character.is_control() {
+            return true;
+        }
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if character == '\\' && quote.is_some() {
+            escaped = true;
+            continue;
+        }
+        if let Some(active_quote) = quote {
+            if character == active_quote {
+                quote = None;
+            }
+            continue;
+        }
+        if content[offset..].starts_with("/*") || content[offset..].starts_with("*/") {
+            return true;
+        }
+        if matches!(character, '\'' | '"') {
+            quote = Some(character);
+        } else if matches!(character, ';' | '{' | '}') {
+            return true;
+        }
+    }
+    quote.is_some()
 }
 
 fn declaration_with_dependencies(
@@ -3106,6 +3293,7 @@ mod tests {
 
     use super::{
         escape_class_selector, resolve, UtilityDefinition, UtilityErrorKind, UtilityRegistry,
+        ValueNamespace,
     };
 
     #[test]
@@ -3197,6 +3385,19 @@ mod tests {
     }
 
     #[test]
+    fn utility_fingerprints_include_utility_kind_and_fields() {
+        assert_ne!(
+            UtilityDefinition::static_declaration("display", "block", 1).fingerprint(),
+            UtilityDefinition::static_declaration("display", "flex", 1).fingerprint()
+        );
+        assert_ne!(
+            UtilityDefinition::static_declaration("display", "block", 1).fingerprint(),
+            UtilityDefinition::functional("display", ValueNamespace::Keyword, false, false, 1,)
+                .fingerprint()
+        );
+    }
+
+    #[test]
     fn rejects_unsafe_theme_values_and_property_identifiers() {
         let theme = Theme::builder().color("unsafe", "red; display:block").build();
         let error = resolve(
@@ -3205,6 +3406,14 @@ mod tests {
             &UtilityRegistry::default(),
         )
         .expect_err("theme values cannot terminate declarations");
+        assert_eq!(error.kind(), UtilityErrorKind::InvalidDeclaration);
+
+        let error = resolve(
+            &parse("rounded").expect("default radius candidate is valid"),
+            &Theme::builder().radius("DEFAULT", "0px;display:block").build(),
+            &UtilityRegistry::default(),
+        )
+        .expect_err("the default radius token is validated at its sink");
         assert_eq!(error.kind(), UtilityErrorKind::InvalidDeclaration);
 
         let error = resolve(

@@ -22,7 +22,7 @@ use utilitycss_config::ConfigFile;
 use utilitycss_css_ir::CssSerializationMode;
 use utilitycss_extractor::{extract_for_framework, Framework};
 use utilitycss_scanner::ExtractionMode;
-use utilitycss_span::SourceId;
+use utilitycss_span::{validate_source_len, SourceId};
 use utilitycss_stylesheet::{transform_stylesheet, StylesheetInput};
 use utilitycss_swc::{extract as extract_swc, SourceKind as SwcSourceKind};
 use walkdir::WalkDir;
@@ -396,7 +396,19 @@ fn run_watch(options: Options) -> Result<(), CliError> {
         NotifyConfig::default().with_poll_interval(options.interval),
     )
     .map_err(|error| CliError::Usage(format!("could not start file watcher: {error}")))?;
-    for input in options.inputs.iter().chain(options.stylesheet_inputs.iter()) {
+    let mut watch_paths =
+        options.inputs.iter().chain(options.stylesheet_inputs.iter()).cloned().collect::<Vec<_>>();
+    if let Some(config) = options.config.as_ref() {
+        let config_key = stable_path(config);
+        let already_watched = watch_paths.iter().any(|input| {
+            let input_key = stable_path(input);
+            input_key == config_key || (input.is_dir() && config_key.starts_with(&input_key))
+        });
+        if !already_watched {
+            watch_paths.push(config.clone());
+        }
+    }
+    for input in &watch_paths {
         let mode =
             if input.is_dir() { RecursiveMode::Recursive } else { RecursiveMode::NonRecursive };
         watcher.watch(input, mode).map_err(|error| CliError::Io {
@@ -417,6 +429,14 @@ fn run_watch(options: Options) -> Result<(), CliError> {
                     }
                 }
                 for event in events {
+                    if config_changed(&event, options.config.as_deref()) {
+                        match reload_config(&mut compiler, &options) {
+                            Ok(()) => {}
+                            Err(error) => {
+                                eprintln!("utilitycss: configuration reload failed: {error}");
+                            }
+                        }
+                    }
                     apply_watch_event(
                         &mut compiler,
                         &event,
@@ -505,21 +525,36 @@ fn apply_watch_event(
 }
 
 fn make_compiler(options: &Options) -> Result<Compiler, CliError> {
+    Ok(Compiler::new(load_compiler_config(options)?))
+}
+
+fn load_compiler_config(options: &Options) -> Result<CompilerConfig, CliError> {
     let file = options
         .config
         .as_ref()
         .map_or_else(|| Ok(ConfigFile::default()), utilitycss_config::load)
         .map_err(CliError::Config)?;
     let mode = options.mode.unwrap_or(file.serialization_mode());
-    Ok(Compiler::new(
-        CompilerConfig::new()
-            .with_theme(file.theme().clone())
-            .with_utility_registry(file.utilities().clone())
-            .with_variant_registry(file.variants().clone())
-            .with_preset_name(file.preset().name())
-            .with_browser_target(file.browser_target())
-            .with_serialization_mode(mode),
-    ))
+    Ok(CompilerConfig::new()
+        .with_theme(file.theme().clone())
+        .with_utility_registry(file.utilities().clone())
+        .with_variant_registry(file.variants().clone())
+        .with_preset_name(file.preset().name())
+        .with_browser_target(file.browser_target())
+        .with_serialization_mode(mode))
+}
+
+fn reload_config(compiler: &mut Compiler, options: &Options) -> Result<(), CliError> {
+    compiler.replace_config(load_compiler_config(options)?);
+    Ok(())
+}
+
+fn config_changed(event: &Event, config: Option<&Path>) -> bool {
+    let Some(config) = config else {
+        return false;
+    };
+    let config = stable_path(config);
+    event.paths.iter().any(|path| stable_path(path) == config)
 }
 
 fn update_file(compiler: &mut Compiler, path: &Path) -> Result<(), CliError> {
@@ -540,6 +575,7 @@ fn extract_candidates(
     path: &Path,
     content: &str,
 ) -> Result<Vec<utilitycss_compiler::CandidateInput>, CliError> {
+    validate_source_len(content.len()).map_err(|error| CliError::Extraction(error.to_string()))?;
     let extension =
         path.extension().and_then(|extension| extension.to_str()).map(str::to_ascii_lowercase);
     let candidates = match extension.as_deref() {
@@ -795,13 +831,17 @@ mod tests {
     use std::{
         fs,
         path::PathBuf,
-        time::{SystemTime, UNIX_EPOCH},
+        time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
     use super::{
-        collect_files, parse_options, run, stable_path, transform_authored_stylesheets, Compiler,
-        CompilerConfig, CssSerializationMode, Options,
+        collect_files, config_changed, make_compiler, parse_options, reload_config, run,
+        stable_path, transform_authored_stylesheets, Compiler, CompilerConfig,
+        CssSerializationMode, Event, Options,
     };
+    use notify::EventKind;
+    use utilitycss_compiler::SourceInput;
+    use utilitycss_span::SourceId;
 
     #[test]
     fn parses_build_options_and_positional_inputs() {
@@ -874,6 +914,45 @@ mod tests {
         assert_eq!(output.css, ".button{display:flex;padding:1rem;}");
         assert!(output.diagnostics.is_empty());
         assert_eq!(compiler.source_count(), 0);
+        fs::remove_dir_all(root).expect("test directory is removed");
+    }
+
+    #[test]
+    fn config_watch_reload_replaces_theme_without_restarting_the_compiler() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is after the Unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("utilitycss-cli-config-watch-{suffix}"));
+        fs::create_dir_all(&root).expect("test directory is created");
+        let config_path = root.join("utilitycss.json");
+        fs::write(&config_path, r#"{"theme":{"colors":{"brand":"red"}}}"#)
+            .expect("initial config is written");
+        let options = Options {
+            inputs: Vec::new(),
+            stylesheet_inputs: Vec::new(),
+            output: None,
+            mode: None,
+            config: Some(config_path.clone()),
+            stats: false,
+            watch: true,
+            once: false,
+            interval: Duration::from_millis(250),
+        };
+        let mut compiler = make_compiler(&options).expect("initial config loads");
+        compiler
+            .update_source(SourceInput::new(SourceId::new("inline"), "bg-brand"))
+            .expect("source is valid");
+        assert!(compiler.build().css().contains("background-color:red"));
+
+        fs::write(&config_path, r#"{"theme":{"colors":{"brand":"blue"}}}"#)
+            .expect("updated config is written");
+        let mut event = Event::new(EventKind::Any);
+        event.paths.push(config_path.clone());
+        assert!(config_changed(&event, options.config.as_deref()));
+        reload_config(&mut compiler, &options).expect("updated config loads");
+
+        assert!(compiler.build().css().contains("background-color:blue"));
         fs::remove_dir_all(root).expect("test directory is removed");
     }
 }

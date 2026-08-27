@@ -13,7 +13,7 @@ use cssparser::{Parser, ParserInput};
 use utilitycss_compiler::{ApplyCandidate, Compiler, CompositionInput};
 use utilitycss_css_ir::{CssDeclaration, CssDocument, CssRule, CssSerializationMode};
 use utilitycss_diagnostics::{Diagnostic, DiagnosticCode};
-use utilitycss_span::{SourceId, Span};
+use utilitycss_span::{validate_source_len, SourceId, Span};
 
 /// Source content supplied to the stylesheet transformer.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -99,6 +99,18 @@ pub fn transform_stylesheet(compiler: &mut Compiler, input: StylesheetInput) -> 
     let content = input.content;
     let mode = compiler.config().serialization_mode();
     let mut diagnostics = Vec::new();
+
+    if let Err(error) = validate_source_len(content.len()) {
+        diagnostics.push(
+            Diagnostic::error(
+                DiagnosticCode::new("stylesheet.source-too-large"),
+                error.to_string(),
+            )
+            .with_source(source)
+            .with_help("split the stylesheet into smaller source units"),
+        );
+        return StylesheetOutput::new(content, diagnostics);
+    }
 
     // Keep the common no-apply path allocation-free and preserve authored formatting exactly.
     if !content.as_bytes().windows("@apply".len()).any(|window| window == b"@apply") {
@@ -506,9 +518,12 @@ fn split_apply_tokens(body: &str, offset: usize) -> Result<Vec<ApplyCandidate>, 
             return Err(ParseFailure::new(offset + cursor, "empty @apply candidate"));
         }
         let raw = &body[start..cursor];
-        let start_u32 = u32::try_from(offset + start).unwrap_or(u32::MAX);
-        let end_u32 = u32::try_from(offset + cursor).unwrap_or(u32::MAX);
-        let span = Span::new(start_u32, end_u32).unwrap_or_else(|| Span::empty(start_u32));
+        let start_u32 = u32::try_from(offset + start)
+            .map_err(|_| ParseFailure::new(offset + start, "stylesheet source is too large"))?;
+        let end_u32 = u32::try_from(offset + cursor)
+            .map_err(|_| ParseFailure::new(offset + cursor, "stylesheet source is too large"))?;
+        let span = Span::new(start_u32, end_u32)
+            .ok_or_else(|| ParseFailure::new(offset + start, "invalid @apply source span"))?;
         candidates.push(ApplyCandidate::new(raw, span));
     }
     Ok(candidates)
@@ -1096,8 +1111,12 @@ fn stylesheet_diagnostic(
 }
 
 fn span_for_range(start: usize, end: usize) -> Span {
-    let start = u32::try_from(start).unwrap_or(u32::MAX);
-    let end = u32::try_from(end).unwrap_or(u32::MAX);
+    let Some(start) = u32::try_from(start).ok() else {
+        return Span::empty(0);
+    };
+    let Some(end) = u32::try_from(end).ok() else {
+        return Span::empty(start);
+    };
     Span::new(start, end).unwrap_or_else(|| Span::empty(start))
 }
 

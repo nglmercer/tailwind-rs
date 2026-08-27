@@ -6,7 +6,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
-use utilitycss_span::Span;
+use utilitycss_span::{validate_source_len, SourceSizeError, Span};
 
 /// Source-discovery strategy used to produce candidate tokens.
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
@@ -78,9 +78,16 @@ impl<'source> CandidateToken<'source> {
 ///
 /// Candidate discovery is linear in the number of source bytes. Bracketed arbitrary values may
 /// contain whitespace and nested brackets; an unterminated bracket consumes the remainder of the
-/// source and is left for the parser to diagnose.
+/// source and is left for the parser to diagnose. For a checked failure on an oversized source,
+/// use [`scan_checked`]; this convenience function returns no candidates for that input.
 #[must_use]
 pub fn scan(source: &str) -> Vec<CandidateToken<'_>> {
+    scan_checked(source).unwrap_or_default()
+}
+
+/// Scans source text and rejects input whose source locations cannot fit in [`Span`].
+pub fn scan_checked(source: &str) -> Result<Vec<CandidateToken<'_>>, SourceSizeError> {
+    validate_source_len(source.len())?;
     let mut tokens = Vec::new();
     let mut cursor = 0;
 
@@ -94,8 +101,8 @@ pub fn scan(source: &str) -> Vec<CandidateToken<'_>> {
             let raw = &source[cursor..end];
             if raw.chars().any(char::is_alphanumeric) {
                 let span = Span::new(
-                    u32::try_from(cursor).unwrap_or(u32::MAX),
-                    u32::try_from(end).unwrap_or(u32::MAX),
+                    u32::try_from(cursor).expect("validated source length fits in a span"),
+                    u32::try_from(end).expect("validated source length fits in a span"),
                 )
                 .expect("scanner end is never before scanner start");
                 tokens.push(CandidateToken::new(raw, span));
@@ -106,7 +113,7 @@ pub fn scan(source: &str) -> Vec<CandidateToken<'_>> {
         }
     }
 
-    tokens
+    Ok(tokens)
 }
 
 fn scan_candidate_end(source: &str, start: usize) -> usize {

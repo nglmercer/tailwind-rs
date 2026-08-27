@@ -124,6 +124,21 @@ test("extracts JavaScript and TSX module graph sources", async () => {
   }
 });
 
+test("retains modules reached through Bun path aliases", async () => {
+  const root = await makeProject({
+    "tsconfig.json": JSON.stringify({ compilerOptions: { baseUrl: ".", paths: { "@/*": ["./*"] } } }),
+    "entry.ts": 'import "@/Button"; import "utilitycss";',
+    "Button.ts": 'export const Button = () => "p-4";'
+  });
+  try {
+    const output = await build(root, utilitycss({ native: FakeNativeCompiler }), "entry.ts");
+    assert.equal(output.result.success, true, JSON.stringify(output.result.logs));
+    assert.match(output.css, /\.p-4\s*\{\s*padding:\s*1rem;/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("rebuilds from the current graph without stale replacement or deleted-source CSS", async () => {
   const root = await makeProject({
     "entry.ts": 'import "./source.ts"; import "utilitycss";',

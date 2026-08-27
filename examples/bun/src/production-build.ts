@@ -33,7 +33,7 @@ if (import.meta.main) {
     result.outputs.filter((output) => output.path.endsWith(".css")).map((output) => output.text())
   );
   const css = cssOutputs.join("\n");
-  if (!css.includes(".button-primary") || !css.includes(".component-card") || !css.includes(".form-input")) {
+  if (!css.includes(".button-primary") || !css.includes(".component-card") || !css.includes(".form-input") || !css.includes(".badge-success") || !css.includes(".alert") || !css.includes(".spinner")) {
     throw new Error("Bun production build did not include generated utilitycss CSS");
   }
   console.log(`Bun production build passed with ${result.outputs.length} output assets.`);

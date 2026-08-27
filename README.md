@@ -223,9 +223,7 @@ Development can run with `bun --hot src/server.ts`; the plugin generates a virtu
 the current Bun module graph and does not require a second watcher or `public/utilitycss.css`.
 Production builds should pass `utilitycss()` explicitly to `Bun.build()`.
 
-[`examples/bun`](./examples/bun/) is a Preact-powered compiler studio with login/register flows, a
-session-aware dashboard, and a mock REST API. Its README includes setup, `bun run verify`, the
-production build, HMR, and packed integration details.
+[`examples/bun`](./examples/bun/) is a Flowbite/daisyUI-parity gallery — 38 components (buttons/groups/dropdowns, badges/avatars/accordion, cards/pricing/carousel/jumbotron, breadcrumbs/pagination/tabs/navbar/sidebar/stepper, forms/inputs/toggles, alerts/banner/progress/spinner/skeleton/rating/timeline/list/toast, table/modal/drawer/popover/tooltip) built with Preact and Bun HMR. Components live in `src/components/*` and are styled via deterministic `utilitycss` utilities + `@apply` recipes. Its README includes setup, `bun run verify`, the production build, HMR, and packed integration details.
 
 ## Local validation
 

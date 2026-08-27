@@ -1,47 +1,71 @@
-# Bun + Preact component demo
+# Bun + Preact component demo — Flowbite/daisyUI parity
 
-This is a small Flowbite/daisyUI-style component gallery built with Bun, Preact, and the native
-`utilitycss` compiler. It focuses on common UI patterns instead of a product workflow:
+A Flowbite + daisyUI-inspired component gallery built with Bun, Preact, and the native `utilitycss` Rust compiler. Every component is a 1:1 visual replication using deterministic utilities and `@apply` recipes — no Tailwind runtime.
 
-- navigation and responsive layout;
-- buttons and badges;
-- cards, profiles, activity lists, and stats;
-- forms, empty states, alerts, and toasts;
-- a responsive data table and modal dialog.
+**38 components across 7 sections:**
 
-The page is intentionally easy to scan. Open `src/app.tsx` to see the component markup and
-`src/app.css` to see a few reusable recipes written with `@apply`. The CSS-first theme in
-[`utilitycss.config.css`](./utilitycss.config.css) supplies the small brand and status palette used
-by the gallery.
+- **Actions:** buttons (6 variants, 4 sizes, icons), button groups, dropdowns, popovers/tooltips
+- **Surfaces:** cards (product, profile, activity, horizontal, pricing ×3), carousel, jumbotron
+- **Display:** badges (6 variants, dot, dismissible, sizes), avatars (sizes, stacked, dot), accordion, list groups
+- **Navigation:** breadcrumbs, pagination, tabs, navbar, sidebar, stepper
+- **Forms:** inputs, textarea, select, checkbox/radio, toggle, file, range, search with icon
+- **Feedback:** alerts (5 variants), banner, progress bars, spinners, skeletons, ratings, timeline, toasts, stats
+- **Data:** responsive table + modal/drawer
+
+## Structure
+
+```
+src/
+  app.tsx                 # gallery orchestrator (sections, state for modal/drawer/toast)
+  components/
+    Icon.tsx              # 28 icons
+    Button.tsx            # Button + ButtonGroup/Sizes/Icons demos
+    Badge.tsx
+    Alert.tsx             # Alert + Banner
+    Card.tsx              # Card, Pricing, Horizontal, Jumbotron
+    Accordion.tsx
+    Avatar.tsx
+    Forms.tsx
+    Navigation.tsx        # Breadcrumb, Pagination, Tabs, Navbar, Sidebar, Stepper
+    Feedback.tsx          # Progress, Spinner, Skeleton, Rating, Timeline, Toast, ListGroup
+    Overlays.tsx          # Dropdown, Popover, Modal, Drawer
+    Carousel.tsx
+    TableSection.tsx
+    index.ts
+  app.css                 # @apply recipes (buttons, badges, alerts, tabs, progress, etc.)
+  style.css               # authored layout only (header, hero, sections, modal/drawer)
+  verify.ts               # Bun.build() + CSS fragment assertions
+  production-build.ts     # production Bun.build() helper
+utilitycss.config.css     # CSS-first theme (brand/blue/green/yellow/red + spacing)
+```
+
+Open `src/app.tsx` to see section composition, `src/app.css` for `@apply` recipes, and `src/style.css` for the minimal authored layout. The CSS-first theme in [`utilitycss.config.css`](./utilitycss.config.css) supplies the brand/blue/green/yellow/red palette shared by dev and prod.
 
 ## Run it
 
-From the repository root, install the workspace dependencies:
+From the repository root, install workspace deps:
 
 ```bash
 npm install
 ```
 
-Then, from this directory, install the example dependency and build the local adapters:
+Then from this directory:
 
 ```bash
 bun install --frozen-lockfile
 bun run setup
 ```
 
-Run the verification script, production build, or development server:
+Verify, build, or dev:
 
 ```bash
-bun run verify
-bun run build
-bun run dev
+bun run verify   # Bun.build() + CSS checks (brand token, radii, shadows, all 38 components)
+bun run build    # writes bundled assets to dist/
+bun run dev      # bun --hot src/server.ts → http://localhost:3000
+bun run test     # alias for verify
 ```
 
-Open <http://localhost:3000> after starting the server. `bun run verify` performs an actual
-`Bun.build()` with the plugin and checks the generated HTML, JavaScript, and CSS assets. `bun run build`
-writes bundled assets to `dist/`. `bun run test` is an alias for the verification command.
-
-The repository-local `bunfig.toml` keeps Bun's development lifecycle on the same configured plugin:
+`bunfig.toml` wires the same config for HMR:
 
 ```toml
 [serve.static]
@@ -50,33 +74,19 @@ plugins = ["./src/bun-plugin.ts"]
 
 ## How it is wired
 
-- `src/index.html` links semantic page CSS, authored `src/app.css`, and the virtual `utilitycss`
-  stylesheet.
-- `src/app.tsx` contains the gallery and small interactions for the mobile menu, form save toast,
-  and modal dialog.
-- `src/app.css` contains reusable button, badge, card, form, and code-block recipes using
-  utilitycss `@apply`.
-- `src/style.css` contains only the demo's presentation details and responsive layout rules. It
-  also defines `--spacing: 0.25rem`, the base used by numeric spacing utilities such as `h-5` and
-  `gap-10`.
-- `utilitycss.config.css` is shared by Bun HMR and `Bun.build()` so theme resolution is consistent.
-- `src/production-build.ts` proves that the same plugin works in a production bundle.
-- `src/verify.ts` checks representative component recipes and generated utility rules.
+- `src/index.html` links `style.css`, `app.css`, and virtual `utilitycss` stylesheet.
+- `src/app.tsx` composes all sections from `src/components/*` with Preact state for mobile nav, modal, drawer, toast, tabs, carousel, forms.
+- `src/app.css` contains recipes like `.button { @apply inline-flex ... }`, `.alert-success { @apply border-green-200 ... }`, `.tab-link-active { @apply border-brand-600 }` — all Rust-backed.
+- `src/style.css` holds only presentation/layout that cannot be expressed as utilities (hero gradient, sticky header, modal backdrop, etc.) and defines `--spacing: 0.25rem`.
+- `utilitycss.config.css` is shared by `bun --hot` and `Bun.build()` so theme resolution is identical.
+- `src/verify.ts` asserts representative recipes and every section's CSS fragments.
 
-This example imports the built repository packages directly, so it is intended to run from a
-checkout of this repository. `@utilitycss/bun` collects the HTML and TSX module graph and returns
-generated CSS through the virtual `utilitycss` stylesheet; it does not require a separate watcher
-or Node.js runtime in the compiled application.
+This example imports built repo packages directly, so run from a checkout. `@utilitycss/bun` collects the HTML+TSX module graph and returns CSS via virtual `utilitycss` stylesheet — no second watcher or Node runtime needed.
 
-Development builds enable Bun adapter debugging. The terminal reports each build number and, when
-an HMR rebuild fails, explains that Bun keeps the last successful bundle active until the source is
-fixed and saved again. This is expected recovery behavior, not a silently ignored failure.
+Dev builds enable Bun adapter debugging (build number + failed HMR recovery message — expected, not silent).
 
-The production `dist/` output and local `node_modules/` are ignored by this example's `.gitignore`.
+`dist/` and `node_modules/` are gitignored.
 
 ## Styling note
 
-The component names in this example (`button`, `component-card`, `badge`, and so on) are ordinary
-authored CSS classes. Their declarations come from `@apply` and the CSS-first theme; they are not a
-claim of Tailwind, Flowbite, or daisyUI compatibility. The example is meant to show how a small
-component vocabulary can be built on top of utilitycss.
+Component class names (`button`, `component-card`, `badge`, etc.) are ordinary authored classes whose declarations come from `@apply` and the CSS-first theme. They are not a claim of Tailwind/Flowbite/daisyUI runtime compatibility — the demo shows how a rich component vocabulary is built on utilitycss's deterministic compiler.

@@ -7,11 +7,11 @@
     "preact": "10.29.8"
   },
   "scripts": {
-    "setup": "npm --prefix ../.. run build:native && npm --prefix ../.. run build --workspace=@utilitycss/node && npm --prefix ../.. run build --workspace=@utilitycss/bun",
-    "build": "bun run src/production-build.ts",
-    "typecheck": "npm exec -- tsc -p tsconfig.json --noEmit",
-    "verify": "bun run src/verify.ts",
-    "test": "bun run verify",
+    "setup": "node ../../scripts/js-tasks.mjs example-setup",
+    "build": "bun src/production-build.ts",
+    "typecheck": "node ../../scripts/js-tasks.mjs example-typecheck",
+    "verify": "bun src/verify.ts",
+    "test": "bun src/verify.ts",
     "dev": "bun --hot src/server.ts"
   }
 }

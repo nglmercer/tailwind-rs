@@ -89,19 +89,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Build current-platform native binding
-        run: npm run build:native --workspace=@utilitycss/napi
+        run: bun run build:native
       - name: Build JavaScript adapters
-        run: npm run build
+        run: bun run build
       - name: Install Bun example dependencies
         run: bun install --cwd examples/bun --frozen-lockfile
       - name: Typecheck Bun example
-        run: npm --prefix examples/bun run typecheck
+        run: bun run --cwd examples/bun typecheck
       - name: Test Bun adapter
-        run: npm test --workspace=@utilitycss/bun
+        run: bun run test:bun
       - name: Verify Bun fullstack example
-        run: npm --prefix examples/bun run verify
+        run: bun run --cwd examples/bun verify
       - name: Verify Bun production build
-        run: npm --prefix examples/bun run build
+        run: bun run --cwd examples/bun build
 
   wasm:
     name: WASM build and runtime smoke

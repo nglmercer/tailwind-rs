@@ -2,12 +2,18 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
+import { nodeExecutable, spawnEnv } from "./lib/exec.mjs";
+
 const repositoryRoot = resolve(import.meta.dirname, "..");
-const npm = process.env.npm_execpath
-  ? [process.execPath, process.env.npm_execpath]
-  : process.platform === "win32"
-    ? [process.execPath, join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js")]
-    : ["npm"];
+// `npm_execpath` points at whichever runner started this script; under `bun run`
+// that is the Bun binary, not npm-cli.js, so only honour it when it really is npm.
+const npmCli = /npm-cli\.js$/.test(process.env.npm_execpath ?? "") ? process.env.npm_execpath : undefined;
+const node = nodeExecutable();
+const bundledNpmCli =
+  process.platform === "win32" && node !== "node"
+    ? join(dirname(node), "node_modules", "npm", "bin", "npm-cli.js")
+    : undefined;
+const npm = npmCli ? [node, npmCli] : bundledNpmCli ? [node, bundledNpmCli] : ["npm"];
 const results = [];
 let failures = 0;
 
@@ -45,7 +51,7 @@ function run(label, command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: options.cwd ?? repositoryRoot,
     encoding: "utf8",
-    env: options.env ?? process.env,
+    env: spawnEnv(options.env ?? process.env),
     stdio: ["ignore", "pipe", "pipe"]
   });
   if (result.error?.code === "ENOENT") {
@@ -70,6 +76,27 @@ function runReleaseNpm(label, args, options = {}) {
     return false;
   }
   return runNpm(label, args, options);
+}
+
+function runJsTask(label, task, options = {}) {
+  if (!npmReady) {
+    skip(label, "clean npm install failed");
+    return false;
+  }
+  return run(label, nodeExecutable(), [join(repositoryRoot, "scripts", "js-tasks.mjs"), task], options);
+}
+
+function runWorkspaceScript(label, scriptName, packageName, options = {}) {
+  if (!npmReady) {
+    skip(label, "clean npm install failed");
+    return false;
+  }
+  return run(
+    label,
+    nodeExecutable(),
+    [join(repositoryRoot, "scripts", "run-workspace.mjs"), scriptName, packageName],
+    options
+  );
 }
 
 function currentPlatformLabel() {
@@ -160,11 +187,11 @@ run("Rust 1.88 tests", "cargo", ["+1.88", "test", "--workspace", "--all-features
   skipReason: "Rust 1.88 toolchain is not installed"
 });
 
-runReleaseNpm("JavaScript lint", ["run", "lint"]);
-runReleaseNpm("JavaScript typecheck", ["run", "typecheck"]);
-runReleaseNpm("JavaScript build", ["run", "build"]);
-runReleaseNpm("JavaScript tests", ["test"]);
-runReleaseNpm("Node @apply smoke", ["test", "--workspace=@utilitycss/node"]);
+runJsTask("JavaScript lint", "lint");
+runJsTask("JavaScript typecheck", "typecheck");
+runJsTask("JavaScript build", "build");
+runJsTask("JavaScript tests", "test");
+runWorkspaceScript("Node @apply smoke", "test", "@utilitycss/node");
 runReleaseNpm("JavaScript dependency audit", ["audit", "--audit-level=high"]);
 runReleaseNpm("Package-content validation", ["run", "validate:packages"]);
 runReleaseNpm("Vite production smoke", ["run", "smoke:vite"]);
@@ -173,11 +200,11 @@ runReleaseNpm("Vite @apply smoke", ["run", "smoke:vite"]);
 const currentPlatform = currentPlatformLabel();
 let currentPlatformEvidence = false;
 if (currentPlatform) {
-  const nativeBuild = runReleaseNpm("Current-platform native build", ["run", "build:native"]);
+  const nativeBuild = runJsTask("Current-platform native build", "build:native");
   if (nativeBuild) {
-    const nodeBuild = runReleaseNpm("Current-platform Node adapter build", ["run", "build", "--workspace=@utilitycss/node"]);
-    runReleaseNpm("Current-platform Bun adapter build", ["run", "build", "--workspace=@utilitycss/bun"]);
-    const nodeSmoke = runReleaseNpm("Current-platform native Node smoke", ["test", "--workspace=@utilitycss/node"]);
+    const nodeBuild = runWorkspaceScript("Current-platform Node adapter build", "build", "@utilitycss/node");
+    runWorkspaceScript("Current-platform Bun adapter build", "build", "@utilitycss/bun");
+    const nodeSmoke = runWorkspaceScript("Current-platform native Node smoke", "test", "@utilitycss/node");
     currentPlatformEvidence = nodeBuild && nodeSmoke;
     runReleaseNpm("Packed Node clean-project smoke", ["run", "smoke:packed-node"]);
     runReleaseNpm("Packed Bun clean-project smoke", ["run", "smoke:packed-bun"], {
@@ -209,12 +236,13 @@ for (const [label, platform, arch] of [
 runWasmGate();
 
 if (commandAvailable("bun", ["--version"])) {
-  run("Bun example dependency install", "bun", ["install", "--cwd", join(repositoryRoot, "examples", "bun"), "--frozen-lockfile"]);
-  runReleaseNpm("Bun example typecheck", ["--prefix", "examples/bun", "run", "typecheck"]);
-  runReleaseNpm("Bun adapter tests", ["test", "--workspace=@utilitycss/bun"]);
-  runReleaseNpm("Bun @apply and incremental smoke", ["test", "--workspace=@utilitycss/bun"]);
-  runReleaseNpm("Bun fullstack example verify", ["--prefix", "examples/bun", "run", "verify"]);
-  runReleaseNpm("Bun fullstack production build", ["--prefix", "examples/bun", "run", "build"]);
+  const exampleDir = join(repositoryRoot, "examples", "bun");
+  run("Bun example dependency install", "bun", ["install", "--cwd", exampleDir, "--frozen-lockfile"]);
+  runJsTask("Bun example typecheck", "example-typecheck");
+  runJsTask("Bun adapter tests", "test:bun");
+  runJsTask("Bun @apply and incremental smoke", "test:bun");
+  run("Bun fullstack example verify", "bun", [join(exampleDir, "src", "verify.ts")], { cwd: exampleDir });
+  run("Bun fullstack production build", "bun", [join(exampleDir, "src", "production-build.ts")], { cwd: exampleDir });
 } else {
   skip("Bun adapter tests", "Bun is not installed");
   skip("Bun fullstack example verify", "Bun is not installed");

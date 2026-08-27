@@ -1,5 +1,6 @@
 import { useState } from "preact/hooks";
 import { Icon } from "./Icon.tsx";
+import { Tabs } from "./ui/Tabs.tsx";
 
 export function BreadcrumbDemo() {
   return (
@@ -29,18 +30,17 @@ export function PaginationDemo() {
 }
 
 export function TabsDemo() {
-  const tabs = ["Profile", "Dashboard", "Settings", "Contacts"];
-  const [active, setActive] = useState(1);
+  const tabs = [
+    { value: "profile", label: "Profile" },
+    { value: "dashboard", label: "Dashboard" },
+    { value: "settings", label: "Settings" },
+    { value: "contacts", label: "Contacts" }
+  ];
+  const [active, setActive] = useState("dashboard");
   return (
     <div className="w-full">
-      <div className="border border-gray-200">
-        <ul className="flex flex-wrap gap-6">
-          {tabs.map((t, i) => (
-            <li key={t}><button type="button" className={`tab-link ${active === i ? "tab-link-active" : ""}`} onClick={() => setActive(i)}>{t}</button></li>
-          ))}
-        </ul>
-      </div>
-      <div className="rounded-b-lg border border-gray-200 bg-white p-4 text-sm text-gray-600">Content for <strong>{tabs[active]}</strong> — Flowbite tabs replicated with utilitycss utilities + tiny state.</div>
+      <Tabs idPrefix="navigation-demo" value={active} onChange={setActive} items={tabs} variant="border" ariaLabel="Navigation demo tabs" />
+      <div className="rounded-b-lg border border-gray-200 bg-white p-4 text-sm text-gray-600" id={`navigation-demo-panel-${active}`} role="tabpanel" aria-labelledby={`navigation-demo-tab-${active}`}>Content for <strong>{tabs.find(tab => tab.value === active)?.label}</strong> — Flowbite tabs replicated with utilitycss utilities + tiny state.</div>
     </div>
   );
 }

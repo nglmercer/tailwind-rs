@@ -2,9 +2,187 @@
 
 `utilitycss` is a runtime-agnostic utility CSS compiler platform written in Rust.
 
-It treats utility class names as a small domain-specific language and is designed to serve native Rust applications, a CLI, and thin integrations for Node.js, Bun, Deno, Vite, and SWC-based toolchains. The compiler core owns semantics; host runtimes own I/O and lifecycle integration.
+It treats utility class names as a small domain-specific language and is designed to serve native
+Rust applications, a CLI, and thin integrations for Node.js, Bun, Deno, Vite, and SWC-based
+toolchains. The compiler core owns semantics; host runtimes own I/O and lifecycle integration.
 
-> Status: production-readiness implementation in progress. The workspace now includes SWC AST extraction, Vue/Svelte/Astro static framework extraction, versioned registry presets/plugins, an LSP adapter, conformance fixtures, native extraction smoke coverage, and malformed-input property tests. Full Tailwind compatibility, broader framework semantics, and release hardening still require their explicit gates; `utilitycss` remains pre-1.0.
+> Status: production-readiness implementation in progress. The workspace includes SWC AST
+> extraction, Vue/Svelte/Astro static framework extraction, versioned registry presets/plugins, an
+> LSP adapter, conformance fixtures, native extraction smoke coverage, and malformed-input property
+> tests. Full Tailwind compatibility, broader framework semantics, and release hardening still
+> require their explicit gates; `utilitycss` remains pre-1.0.
+
+## Getting started
+
+These steps assume a clone of this repository. Published npm packages are not a drop-in substitute
+for a local checkout until a 1.0 release.
+
+### Prerequisites
+
+- **Rust** stable, edition 2021, MSRV **1.88**
+- **Node.js** 20+ (npm is the workspace package manager; every root script also runs under `bun run`)
+- **Bun** 1.2+ only if you run the Bun adapter or [`examples/bun`](./examples/bun/)
+- A C toolchain for N-API native builds (`gcc`/`clang` on Linux, Xcode CLT on macOS, MSVC on Windows)
+
+### Clone and install JavaScript workspaces
+
+```bash
+git clone https://github.com/nglmercer/tailwind-rs.git
+cd tailwind-rs
+npm install
+```
+
+`npm install` installs the `packages/*` workspaces (`@utilitycss/node`, `@utilitycss/bun`,
+`@utilitycss/vite`, `@utilitycss/wasm`, `@utilitycss/napi`). It does **not** compile the native
+N-API binary; see [Build the N-API binding](#build-the-n-api-binding).
+
+### Compile CSS with the native CLI
+
+The fastest way to see compiler output is the Rust CLI. From the repository root:
+
+```bash
+cargo run -p utilitycss-cli -- build --pretty crates/utilitycss-cli/tests/fixtures/basic.html
+```
+
+That fixture is:
+
+```html
+<main class="flex gap-4 p-4 hover:bg-red-500 md:grid"></main>
+```
+
+Useful CLI commands:
+
+```bash
+# Write CSS to a file
+cargo run -p utilitycss-cli -- build --pretty -o dist/utilitycss.css path/to/src
+
+# Watch inputs and rebuild
+cargo run -p utilitycss-cli -- watch --pretty -o dist/utilitycss.css path/to/src
+
+# Transform authored CSS that uses @apply
+cargo run -p utilitycss-cli -- build --pretty --stylesheet src/app.css path/to/src
+
+# Optional JSON or CSS-first config
+cargo run -p utilitycss-cli -- build --config path/to/config.json path/to/src
+
+# Inspect one candidate
+cargo run -p utilitycss-cli -- explain flex
+cargo run -p utilitycss-cli -- validate hover:bg-red-500
+```
+
+Install a local binary with `cargo install --path crates/utilitycss-cli`. The binary name is
+`utilitycss-cli`.
+
+### Build the N-API binding
+
+JavaScript adapters (`@utilitycss/node`, `@utilitycss/bun`, `@utilitycss/vite`) load a native
+addon produced from `crates/utilitycss-napi`. Wrapper unit tests inject a fake constructor, so
+`npm test` can pass **without** this binary. Real Node/Bun/Vite usage and the example app
+**MUST** have a platform `.node` file.
+
+From the repository root, after `npm install`:
+
+```bash
+npm run build:native
+```
+
+That runs `@napi-rs/cli` against `crates/utilitycss-napi` and writes a platform artifact such as
+`packages/utilitycss-napi/utilitycss-napi.linux-x64-gnu.node` (name varies by OS/arch).
+
+The same script runs under Bun:
+
+```bash
+bun run build:native
+```
+
+Root scripts are thin wrappers over `scripts/js-tasks.mjs`, which resolves each workspace binary
+itself instead of shelling out to `npm run --workspace=...`. That keeps them working identically
+under `npm run` and `bun run`.
+
+Then build the TypeScript adapters that sit on top of the native package:
+
+```bash
+npm run build
+```
+
+`npm run build` compiles `@utilitycss/node`, `@utilitycss/bun`, `@utilitycss/vite`, and
+`@utilitycss/wasm`. It does not rebuild the `.node` binary.
+
+Supported N-API targets (see `packages/utilitycss-napi/package.json`):
+
+- `x86_64-unknown-linux-gnu`
+- `x86_64-pc-windows-msvc`
+- `aarch64-apple-darwin`
+- `x86_64-apple-darwin`
+
+Cross-compiling other targets is a release concern (`npm run prepare:release`);
+local development only needs the current platform.
+
+If `require('@utilitycss/napi')` fails with a missing `.node` file, rerun `npm run build:native`
+from the repository root.
+
+### Run the Bun example
+
+[`examples/bun`](./examples/bun/) is a Preact component gallery that uses the local workspace
+packages and the native compiler. It is meant to run from this checkout, not from published
+registry tarballs.
+
+From the repository root:
+
+```bash
+npm install
+```
+
+Then:
+
+```bash
+cd examples/bun
+bun install --frozen-lockfile
+bun run setup
+```
+
+`bun run setup` builds the N-API binary and the `@utilitycss/node` / `@utilitycss/bun` TypeScript
+packages from the parent workspace.
+
+| Command | What it does |
+| --- | --- |
+| `bun run dev` | `bun --hot src/server.ts` — development server with HMR |
+| `bun run verify` | Runs `Bun.build()` with the plugin and checks generated HTML/JS/CSS |
+| `bun run build` | Writes production assets to `dist/` |
+| `bun run test` | Alias for `verify` |
+| `bun run typecheck` | TypeScript `--noEmit` for the example |
+
+Open <http://localhost:3000> after `bun run dev`.
+
+The example's `bunfig.toml` loads a local plugin wrapper so Bun's static server uses the same
+compiler as production `Bun.build()`:
+
+```toml
+[serve.static]
+plugins = ["./src/bun-plugin.ts"]
+```
+
+HTML links the virtual stylesheet:
+
+```html
+<link rel="stylesheet" href="utilitycss" />
+```
+
+See [`examples/bun/README.md`](./examples/bun/README.md) for wiring details (`src/app.tsx`,
+`src/app.css` `@apply` recipes, `utilitycss.config.css`).
+
+### JavaScript adapter checks
+
+From the repository root, after `npm install` and (for native-backed tests) `npm run build:native`:
+
+```bash
+npm run lint
+npm run typecheck
+npm run build
+npm test
+```
+
+Substituting `bun run` for `npm run` works for all four (`bun run test` for `npm test`).
 
 ## Design goals
 
@@ -45,7 +223,19 @@ An illustrative result is:
 /* variant-generated rules are omitted */
 ```
 
-The current CLI can emit this same semantic subset with `cargo run -p utilitycss-cli -- build <input>`.
+The CLI emits this same semantic subset with `cargo run -p utilitycss-cli -- build <input>`.
+
+`utilitycss` also provides an `@apply`-compatible composition directive backed by the Rust utility
+registry:
+
+```css
+.button {
+  @apply flex items-center gap-2 rounded bg-brand-600 p-4 text-white;
+}
+```
+
+See [`docs/APPLY.md`](./docs/APPLY.md) for supported variants, diagnostics, ordering, adapter APIs,
+and compatibility limitations.
 
 ## Architecture
 
@@ -69,7 +259,7 @@ See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) and [`docs/CRATE_LAYOUT.md`
 
 ## Current implementation
 
-The initial workspace is intentionally small and runtime-independent:
+The workspace is runtime-independent at the core:
 
 - [`utilitycss-span`](./crates/utilitycss-span/) — stable source IDs and half-open byte spans.
 - [`utilitycss-diagnostics`](./crates/utilitycss-diagnostics/) — typed, source-aware diagnostics.
@@ -95,6 +285,7 @@ The initial workspace is intentionally small and runtime-independent:
 - [`@utilitycss/bun`](./packages/utilitycss-bun/) — Bun bundler, fullstack, and HMR plugin.
 - [`@utilitycss/vite`](./packages/utilitycss-vite/) — Vite lifecycle adapter.
 - [`@utilitycss/wasm`](./packages/utilitycss-wasm/) — TypeScript wrapper for generated WASM bindings.
+- [`@utilitycss/napi`](./packages/utilitycss-napi/) — npm package that ships the N-API `.node` artifact.
 
 The facade currently compiles the documented vNext utility and variant subset and exposes the same
 registry through explain, validate, completion, hover, capability, and compatibility APIs. It
@@ -129,7 +320,7 @@ Start with [`LLMS.md`](./LLMS.md) for agent guidance, [`docs/VISION.md`](./docs/
 
 ### Repository guidance
 
-- [`README.md`](./README.md) — project overview and documentation index.
+- [`README.md`](./README.md) — project overview, getting started, and documentation index.
 - [`AGENTS.md`](./AGENTS.md) — repository rules for contributors and coding agents.
 - [`LLMS.md`](./LLMS.md) — instructions and priorities for autonomous coding agents.
 - [`MANIFEST.json`](./MANIFEST.json) — machine-readable inventory of the repository documentation.
@@ -151,6 +342,7 @@ Start with [`LLMS.md`](./LLMS.md) for agent guidance, [`docs/VISION.md`](./docs/
 ### Integrations and operations
 
 - [`docs/ADAPTERS.md`](./docs/ADAPTERS.md) — Node.js, Bun, Deno, Vite, and SWC adapter plans.
+- [`docs/APPLY.md`](./docs/APPLY.md) — `@apply` composition.
 - [`docs/COMPATIBILITY.md`](./docs/COMPATIBILITY.md) — compatibility and conformance policy.
 - [`docs/OBSERVABILITY.md`](./docs/OBSERVABILITY.md) — optional statistics, tracing, and privacy rules.
 - [`docs/PERFORMANCE.md`](./docs/PERFORMANCE.md) — performance targets and benchmark guidance.
@@ -187,44 +379,6 @@ Start with [`LLMS.md`](./LLMS.md) for agent guidance, [`docs/VISION.md`](./docs/
 
 Before implementation work, read [`LLMS.md`](./LLMS.md), [`docs/VISION.md`](./docs/VISION.md), [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md), and the relevant specification and roadmap phase. Externally visible grammar, configuration, ordering, API, or architecture changes SHOULD be recorded through the RFC/ADR process described in [`docs/CONTRIBUTING.md`](./docs/CONTRIBUTING.md).
 
-The baseline formatting, lint, test, and benchmark commands are defined in [`AGENTS.md`](./AGENTS.md) and are runnable against the current workspace.
-
-## Bun example
-
-`utilitycss` also provides an `@apply`-compatible composition directive backed by the Rust utility
-registry:
-
-```css
-.button {
-  @apply flex items-center gap-2 rounded bg-brand-600 p-4 text-white;
-}
-```
-
-See [`docs/APPLY.md`](./docs/APPLY.md) for supported variants, diagnostics, ordering, adapter APIs,
-and compatibility limitations.
-
-`@utilitycss/node` is the generic JavaScript compiler lifecycle API. `@utilitycss/bun` integrates
-that API with Bun's bundler, fullstack server, and HMR lifecycle:
-
-```bash
-bun add @utilitycss/bun
-```
-
-```toml
-[serve.static]
-plugins = ["@utilitycss/bun"]
-```
-
-```html
-<link rel="stylesheet" href="utilitycss" />
-```
-
-Development can run with `bun --hot src/server.ts`; the plugin generates a virtual stylesheet from
-the current Bun module graph and does not require a second watcher or `public/utilitycss.css`.
-Production builds should pass `utilitycss()` explicitly to `Bun.build()`.
-
-[`examples/bun`](./examples/bun/) is a Flowbite/daisyUI-parity gallery — 38 components (buttons/groups/dropdowns, badges/avatars/accordion, cards/pricing/carousel/jumbotron, breadcrumbs/pagination/tabs/navbar/sidebar/stepper, forms/inputs/toggles, alerts/banner/progress/spinner/skeleton/rating/timeline/list/toast, table/modal/drawer/popover/tooltip) built with Preact and Bun HMR. Components live in `src/components/*` and are styled via deterministic `utilitycss` utilities + `@apply` recipes. Its README includes setup, `bun run verify`, the production build, HMR, and packed integration details.
-
 ## Local validation
 
 From the repository root:
@@ -254,17 +408,6 @@ npm run release:check
 
 This reports unavailable external native architectures as `SKIP`; skipped platform checks are not
 release evidence.
-
-JavaScript adapter checks use npm:
-
-```bash
-npm run lint
-npm run typecheck
-npm run build
-npm test
-```
-
-The native N-API package requires a platform binary produced from `utilitycss-napi` before the default Node loader can be used. Wrapper tests inject a fake native constructor so lifecycle behavior remains testable without that binary.
 
 ## Project vocabulary
 

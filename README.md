@@ -23,6 +23,7 @@ for a local checkout until a 1.0 release.
 - **Node.js** 20+ (npm is the workspace package manager; every root script also runs under `bun run`)
 - **Bun** 1.2+ only if you run the Bun adapter or [`examples/bun`](./examples/bun/)
 - A C toolchain for N-API native builds (`gcc`/`clang` on Linux, Xcode CLT on macOS, MSVC on Windows)
+- **LLVM `lld-link`** on Windows (the workspace's configured linker, see [`.cargo/config.toml`](./.cargo/config.toml)): `winget install -e --id LLVM.LLVM`, with "Add LLVM to the system PATH" selected
 
 ### Clone and install JavaScript workspaces
 

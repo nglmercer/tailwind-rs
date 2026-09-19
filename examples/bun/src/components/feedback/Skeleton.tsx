@@ -1,6 +1,6 @@
 export function SkeletonDemo() {
   return (
-    <div className="animate-pulse space-y-3">
+    <div className="animate-pulse-soft space-y-3">
       <div className="h-4 w-3/4 rounded bg-gray-200" />
       <div className="h-4 rounded bg-gray-200" />
       <div className="h-4 w-5/6 rounded bg-gray-200" />

@@ -39,6 +39,7 @@ import {
   MegaMenuPage,
   MenuPage,
   ModalPage,
+  MotionPage,
   NavbarPage,
   OtpPage,
   PaginationPage,
@@ -169,7 +170,8 @@ export const catalog: readonly CatalogItem[] = [
   { slug: "phone", name: "Phone", category: "mockup", description: "Frame mobile content inside a phone silhouette.", demo: PhoneMockupPage, code: `<PhoneMockup>...</PhoneMockup>` },
   { slug: "window", name: "Window", category: "mockup", description: "Frame desktop content inside an OS window.", demo: WindowMockupPage, code: `<WindowMockup title="main" />` },
 
-  { slug: "compiler-lab", name: "Compiler Lab", category: "tools", description: "Compile live source against the demo config: generated CSS, diagnostics, browser targets, and per-candidate validation.", demo: CompilerLabPage, code: `POST /api/compile\n{ "source": "<div class=\\"flex\\">…", "browserTarget": "safari-15", "mode": "markup" }`, css: `.flex {\n  display: flex;\n}` }
+  { slug: "compiler-lab", name: "Playground", category: "tools", description: "Experiment live against the demo config: rendered preview, generated CSS, diagnostics, candidate validation, and API docs.", demo: CompilerLabPage, code: `POST /api/compile\n{ "source": "<div class=\\"flex\\">…", "browserTarget": "safari-15", "mode": "markup" }`, css: `.flex {\n  display: flex;\n}` },
+  { slug: "motion", name: "Motion", category: "tools", description: "Keyframe entrances, transition timing, loading states, and reduced-motion handling.", demo: MotionPage, code: `<div className="animate-fade-in">Hello</div>`, css: `.animate-fade-in { animation: fade-in 0.5s ease-out both; }` }
 ];
 
 export function getCategoryLabel(category: Category): string {

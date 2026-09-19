@@ -23,6 +23,7 @@ for (const category of categoryDefinitions) {
 }
 assert(catalog.filter(item => item.category === "data-input").length >= 10, "data-input should list each control on its own page");
 assert(catalog.filter(item => item.category === "mockup").length >= 4, "mockup should cover browser, code, phone, and window frames");
+assert(catalog.some(item => item.slug === "motion" && item.category === "tools"), "tools should include the motion page");
 assert(new Set(slugs).size === slugs.length, "catalog contains duplicate component slugs");
 for (const item of catalog) {
   assert(categoryValues.has(item.category), `catalog item ${item.slug} references an unknown category`);
@@ -97,6 +98,12 @@ const expectedOutput = [
   ".mockup-code",
   ".mockup-phone",
   ".mockup-window",
+  ".animate-fade-in",
+  ".animate-pulse-soft",
+  ".loading-dots",
+  ".motion-stage",
+  ".playground-preview",
+  ".playground-empty",
   ".tabs",
   ".tab",
   ".tabs-box",
@@ -121,6 +128,11 @@ assert(css.includes(".timeline{list-style:none"), "timeline list-style reset was
 assert(css.includes(".carousel-slide{display:flex"), "carousel slide layout did not move into the recipe");
 assert(css.includes(".pricing-card-featured{border-color:#4f46e5"), "featured pricing border was not emitted");
 assert(css.includes(".list-none{list-style-type:none}"), "list-none utility was not emitted");
+// Motion proofs: keyframe entrances ship with their keyframes, and every
+// animation is disabled under prefers-reduced-motion.
+assert(css.includes(".animate-fade-in{animation:.5s ease-out both fade-in}"), "fade-in entrance was not emitted");
+assert(css.includes("@keyframes pulse-soft"), "pulse-soft keyframes are missing from the output");
+assert(css.includes("prefers-reduced-motion"), "reduced-motion handling is missing from the output");
 assert(css.includes("background-color:#4f46e5"), "CSS-first brand token was not resolved");
 assert(css.includes("border-radius"), "common radius utilities were not emitted");
 assert(css.includes("box-shadow"), "common shadow utilities were not emitted");

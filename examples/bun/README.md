@@ -2,7 +2,7 @@
 
 A documentation-style component explorer built with Bun, Preact, and the native `utilitycss` Rust compiler. Components are statically imported into one catalog, selected through hash URLs, and shown one focused page at a time — no router dependency or Tailwind runtime.
 
-**68 catalog entries across eight categories:**
+**69 catalog entries across eight categories:**
 
 - **Actions:** button, dropdown, FAB, modal, popover, swap, and theme controller
 - **Data display:** accordion, avatar, badge, card, carousel, chat bubble, collapse, countdown, diff, kbd, list group, stat, status, table, and timeline
@@ -11,7 +11,7 @@ A documentation-style component explorer built with Bun, Preact, and the native 
 - **Data input:** calendar, checkbox, fieldset, file input, filter, input, label, OTP, radio, range, rating, select, textarea, toggle, and validator
 - **Layout:** divider, drawer, footer, hero, indicator, join, mask, and stack
 - **Mockup:** browser, code, phone, and window frames
-- **Tools:** Compiler Lab — live source, generated CSS, diagnostics, and browser targets
+- **Tools:** Playground (live preview, CSS, diagnostics, candidates, API docs) and Motion (keyframes, transitions, loading)
 
 The catalog covers the DaisyUI-style component list end to end. It is the source of truth for navigation, search, route reachability, and the displayed component count.
 
@@ -42,12 +42,13 @@ src/
     data-input/           # Calendar, Checkbox, Input, OTP, Validator, ... (one file each)
     layout/               # Divider, Drawer, Footer, Hero, Indicator, Join, Mask, Stack
     mockup/               # Browser, Code, Phone, Window
+    tools/Motion.tsx      # keyframes, transitions, loading demos
     index.ts              # barrel re-exporting every component module
   app.css                 # @apply recipes (buttons, badges, alerts, tabs, progress, etc.)
   style.css               # authored layout only (header, hero, sections, modal/drawer)
   lib/cn.ts               # minimal clsx-style class joiner used by components
   lab/
-    CompilerLab.tsx       # interactive Compiler Lab page (Tools category)
+    CompilerLab.tsx       # interactive Playground page (Tools category)
     compile.ts            # Lab compile backend shared by the server route and verify
     route.ts              # POST /api/compile handler
     load-config.ts        # config loader, embedded via a Bun macro at bundle time

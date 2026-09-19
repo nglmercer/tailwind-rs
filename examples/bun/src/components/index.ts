@@ -63,6 +63,7 @@ export * from "./layout/Indicator.tsx";
 export * from "./layout/Join.tsx";
 export * from "./layout/Mask.tsx";
 export * from "./layout/Stack.tsx";
+export * from "./tools/Motion.tsx";
 export * from "./mockup/Browser.tsx";
 export * from "./mockup/Code.tsx";
 export * from "./mockup/Phone.tsx";

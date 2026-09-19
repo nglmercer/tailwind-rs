@@ -16,7 +16,13 @@ function assert(condition: unknown, message: string): asserts condition {
 
 const categoryValues = new Set(categoryDefinitions.map(category => category.value));
 const slugs = catalog.map(item => item.slug);
-assert(catalog.length >= 10, "catalog should contain at least ten focused component pages");
+assert(catalog.length >= 60, "catalog should cover the full component library (60+ focused pages)");
+for (const category of categoryDefinitions) {
+  const count = catalog.filter(item => item.category === category.value).length;
+  assert(count > 0, `catalog category ${category.value} has no component pages`);
+}
+assert(catalog.filter(item => item.category === "data-input").length >= 10, "data-input should list each control on its own page");
+assert(catalog.filter(item => item.category === "mockup").length >= 4, "mockup should cover browser, code, phone, and window frames");
 assert(new Set(slugs).size === slugs.length, "catalog contains duplicate component slugs");
 for (const item of catalog) {
   assert(categoryValues.has(item.category), `catalog item ${item.slug} references an unknown category`);
@@ -59,6 +65,38 @@ const expectedOutput = [
   ".carousel-dot",
   ".drawer-panel",
   ".avatar-stack",
+  ".fab",
+  ".swap",
+  ".theme-controller",
+  ".chat-bubble",
+  ".fold-panel",
+  ".countdown",
+  ".diff-frame",
+  ".kbd",
+  ".status-list",
+  ".dock",
+  ".link",
+  ".menu",
+  ".megamenu-panel",
+  ".radial-progress",
+  ".tooltip-bubble",
+  ".calendar-day",
+  ".checkbox-input",
+  ".radio-card",
+  ".otp-box",
+  ".validator-card",
+  ".filter-chip",
+  ".label-floating",
+  ".divider",
+  ".footer-demo",
+  ".indicator-badge",
+  ".join",
+  ".mask-shape",
+  ".stack-card",
+  ".mockup-browser",
+  ".mockup-code",
+  ".mockup-phone",
+  ".mockup-window",
   ".tabs",
   ".tab",
   ".tabs-box",

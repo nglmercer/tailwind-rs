@@ -2,18 +2,18 @@
 
 A documentation-style component explorer built with Bun, Preact, and the native `utilitycss` Rust compiler. Components are statically imported into one catalog, selected through hash URLs, and shown one focused page at a time — no router dependency or Tailwind runtime.
 
-**29 catalog entries across eight categories:**
+**68 catalog entries across eight categories:**
 
-- **Actions:** button, dropdown, modal, and popover
-- **Data display:** accordion, avatar, badge, card, carousel, list group, table, and timeline
-- **Navigation:** breadcrumbs, navbar, pagination, sidebar, steps, and reusable tabs
-- **Feedback:** alert, banner, progress, rating, skeleton, spinner, and toast
-- **Data input:** the existing grouped forms demo with controls and validation examples
-- **Layout:** drawer and hero examples
-- **Mockup:** reserved for the next catalog expansion
+- **Actions:** button, dropdown, FAB, modal, popover, swap, and theme controller
+- **Data display:** accordion, avatar, badge, card, carousel, chat bubble, collapse, countdown, diff, kbd, list group, stat, status, table, and timeline
+- **Navigation:** breadcrumbs, dock, link, megamenu, menu, navbar, pagination, sidebar, steps, and reusable tabs
+- **Feedback:** alert, banner, progress, radial progress, skeleton, spinner, toast, and tooltip
+- **Data input:** calendar, checkbox, fieldset, file input, filter, input, label, OTP, radio, range, rating, select, textarea, toggle, and validator
+- **Layout:** divider, drawer, footer, hero, indicator, join, mask, and stack
+- **Mockup:** browser, code, phone, and window frames
 - **Tools:** Compiler Lab — live source, generated CSS, diagnostics, and browser targets
 
-The catalog is intentionally smaller than DaisyUI's full component list for now. It is the source of truth for navigation, search, route reachability, and the displayed component count.
+The catalog covers the DaisyUI-style component list end to end. It is the source of truth for navigation, search, route reachability, and the displayed component count.
 
 ## Structure
 
@@ -31,23 +31,18 @@ src/
     ComponentSearch.tsx   # registry search input
     DemoFrame.tsx         # preview / TSX / CSS frame
     ExampleTabs.tsx        # variants and example tabs
-    DemoPages.tsx          # focused wrappers around existing demos
+    DemoPages.tsx          # re-exports the per-category page registry
+    pages/                # one focused page module per catalog category
   components/
-    Icon.tsx              # 28 icons
-    ui/Tabs.tsx            # controlled accessible tabs primitive
-    Button.tsx            # Button + ButtonGroup/Sizes/Icons demos
-    Badge.tsx
-    Alert.tsx             # Alert + Banner
-    Card.tsx              # Card, Pricing, Horizontal, Jumbotron
-    Accordion.tsx
-    Avatar.tsx
-    Forms.tsx
-    Navigation.tsx        # Breadcrumb, Pagination, Tabs, Navbar, Sidebar, Stepper
-    Feedback.tsx          # Progress, Spinner, Skeleton, Rating, Timeline, Toast, ListGroup
-    Overlays.tsx          # Dropdown, Popover, Modal, Drawer
-    Carousel.tsx
-    TableSection.tsx
-    index.ts
+    ui/                   # shared primitives (Icon, Tabs)
+    actions/              # Button, Dropdown, FAB, Modal, Popover, Swap, ThemeController
+    data-display/         # Accordion, Avatar, Badge, Card, Carousel, ChatBubble, ...
+    navigation/           # Breadcrumb, Dock, Link, MegaMenu, Menu, Navbar, ...
+    feedback/             # Alert, Banner, Progress, RadialProgress, Toast, Tooltip, ...
+    data-input/           # Calendar, Checkbox, Input, OTP, Validator, ... (one file each)
+    layout/               # Divider, Drawer, Footer, Hero, Indicator, Join, Mask, Stack
+    mockup/               # Browser, Code, Phone, Window
+    index.ts              # barrel re-exporting every component module
   app.css                 # @apply recipes (buttons, badges, alerts, tabs, progress, etc.)
   style.css               # authored layout only (header, hero, sections, modal/drawer)
   lib/cn.ts               # minimal clsx-style class joiner used by components

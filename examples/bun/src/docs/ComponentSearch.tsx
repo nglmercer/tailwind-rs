@@ -1,4 +1,4 @@
-import { Icon } from "../components/Icon.tsx";
+import { Icon } from "../components/ui/Icon.tsx";
 import { useEffect, useRef } from "preact/hooks";
 
 interface ComponentSearchProps {

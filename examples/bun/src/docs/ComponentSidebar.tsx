@@ -1,7 +1,7 @@
 import type { CatalogItem, Category } from "../catalog.ts";
 import { categoryDefinitions } from "../catalog.ts";
 import { formatHashRoute } from "../hooks/useHashRoute.ts";
-import { Icon } from "../components/Icon.tsx";
+import { Icon } from "../components/ui/Icon.tsx";
 import { cn } from "../lib/cn.ts";
 
 interface ComponentSidebarProps {

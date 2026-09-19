@@ -759,12 +759,12 @@ to use the catalog count automatically instead of manually hardcoding the number
 * [x] **7.** Convert `Button` into the first new component page
 * [x] **8.** Convert `Card`
 * [x] **9.** Convert `Navigation`
-* [ ] **10.** Convert forms into individual component pages
-* [ ] **11.** Convert feedback components
+* [x] **10.** Convert forms into individual component pages
+* [x] **11.** Convert feedback components
 * [x] **12.** Remove the old long-page sections
 * [x] **13.** Add component search
-* [ ] **14.** Add light/dark theme switcher
-* [ ] **15.** Add missing DaisyUI-style components by category
+* [ ] **14.** Add light/dark theme switcher (ThemeController page done; shell-wide toggle deferred)
+* [x] **15.** Add missing DaisyUI-style components by category
 * [x] **16.** Update `verify.ts`
 * [x] **17.** Update Bun example README
 * [x] **18.** Run `typecheck`, `verify`, and `build`

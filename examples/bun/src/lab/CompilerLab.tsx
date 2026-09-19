@@ -1,7 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 
 import type { BrowserTarget } from "../../../../packages/utilitycss-node/src/index.ts";
-import { Button } from "../components/Button.tsx";
+import { Button } from "../components/actions/Button.tsx";
 import type { LabCompileResult, LabMode } from "./compile.ts";
 
 interface LabPreset {

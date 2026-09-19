@@ -379,14 +379,57 @@ fn run_build(options: &Options) -> Result<(), CliError> {
     emit(&mut compiler, options)
 }
 
+/// Returns whether a watch failure is source-level (print the failure and keep
+/// watching) rather than environmental (stop the watcher).
+///
+/// Compiler and extraction failures describe the content of one source, as do
+/// undecodable bytes; the watcher prints them and waits for a fix. I/O,
+/// configuration, and watcher failures describe the environment and stop the
+/// watcher so the broken invocation stays visible to the caller.
+fn is_recoverable_watch_error(error: &CliError) -> bool {
+    match error {
+        CliError::Compiler(_) | CliError::Extraction(_) | CliError::Diagnostics => true,
+        CliError::Io { source, .. } => source.kind() == io::ErrorKind::InvalidData,
+        CliError::Usage(_) | CliError::Config(_) => false,
+    }
+}
+
+/// Applies one batch of watch events without letting source-level failures
+/// stop the watcher. Returns whether output was rewritten.
+fn handle_watch_batch(
+    compiler: &mut Compiler,
+    events: &[Event],
+    options: &Options,
+    known: &mut BTreeMap<PathBuf, ()>,
+) -> Result<bool, CliError> {
+    for event in events {
+        if config_changed(event, options.config.as_deref()) {
+            match reload_config(compiler, options) {
+                Ok(()) => {}
+                Err(error) => {
+                    eprintln!("utilitycss: configuration reload failed: {error}");
+                }
+            }
+        }
+        match apply_watch_event(compiler, event, options.output.as_deref(), known) {
+            Ok(()) => {}
+            Err(error) if is_recoverable_watch_error(&error) => {
+                eprintln!("utilitycss: {error}");
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    emit_watch(compiler, options)
+}
+
 fn run_watch(options: Options) -> Result<(), CliError> {
     let mut compiler = make_compiler(&options)?;
     let mut known = BTreeMap::<PathBuf, ()>::new();
     refresh_sources(&mut compiler, &options.inputs, options.output.as_deref(), &mut known)?;
-    emit(&mut compiler, &options)?;
     if options.once {
-        return Ok(());
+        return emit(&mut compiler, &options);
     }
+    emit_watch(&mut compiler, &options)?;
 
     let (sender, receiver) = mpsc::channel();
     let mut watcher = RecommendedWatcher::new(
@@ -428,23 +471,7 @@ fn run_watch(options: Options) -> Result<(), CliError> {
                         }
                     }
                 }
-                for event in events {
-                    if config_changed(&event, options.config.as_deref()) {
-                        match reload_config(&mut compiler, &options) {
-                            Ok(()) => {}
-                            Err(error) => {
-                                eprintln!("utilitycss: configuration reload failed: {error}");
-                            }
-                        }
-                    }
-                    apply_watch_event(
-                        &mut compiler,
-                        &event,
-                        options.output.as_deref(),
-                        &mut known,
-                    )?;
-                }
-                emit(&mut compiler, &options)?;
+                handle_watch_batch(&mut compiler, &events, &options, &mut known)?;
             }
             Ok(Err(error)) => return Err(CliError::Usage(format!("file watcher error: {error}"))),
             Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -462,16 +489,21 @@ fn refresh_sources(
     known: &mut BTreeMap<PathBuf, ()>,
 ) -> Result<(), CliError> {
     let files = collect_files(inputs, output)?;
+    let mut current = BTreeMap::new();
     for path in &files {
-        if !is_stylesheet(path) {
-            update_file(compiler, path)?;
+        if is_stylesheet(path) {
+            continue;
+        }
+        match update_file(compiler, path) {
+            Ok(()) => {
+                current.insert(path.clone(), ());
+            }
+            Err(error) if is_recoverable_watch_error(&error) => {
+                eprintln!("utilitycss: {error}");
+            }
+            Err(error) => return Err(error),
         }
     }
-    let current = files
-        .into_iter()
-        .filter(|path| !is_stylesheet(path))
-        .map(|path| (path, ()))
-        .collect::<BTreeMap<_, _>>();
     let removed =
         known.keys().filter(|path| !current.contains_key(*path)).cloned().collect::<Vec<_>>();
     for path in removed {
@@ -600,18 +632,22 @@ fn extract_candidates(
             .map(|candidate| (candidate.raw(), candidate.span()))
             .collect::<Vec<_>>(),
         Some("vue") => extract_for_framework(content, Framework::Vue)
+            .map_err(|error| CliError::Extraction(error.to_string()))?
             .into_iter()
             .map(|candidate| (candidate.raw(), candidate.span()))
             .collect::<Vec<_>>(),
         Some("svelte") => extract_for_framework(content, Framework::Svelte)
+            .map_err(|error| CliError::Extraction(error.to_string()))?
             .into_iter()
             .map(|candidate| (candidate.raw(), candidate.span()))
             .collect::<Vec<_>>(),
         Some("astro") => extract_for_framework(content, Framework::Astro)
+            .map_err(|error| CliError::Extraction(error.to_string()))?
             .into_iter()
             .map(|candidate| (candidate.raw(), candidate.span()))
             .collect::<Vec<_>>(),
         _ => extract_for_framework(content, Framework::Html)
+            .map_err(|error| CliError::Extraction(error.to_string()))?
             .into_iter()
             .map(|candidate| (candidate.raw(), candidate.span()))
             .collect::<Vec<_>>(),
@@ -632,6 +668,17 @@ fn extract_candidates(
 }
 
 fn emit(compiler: &mut Compiler, options: &Options) -> Result<(), CliError> {
+    emit_inner(compiler, options, false).map(|_| ())
+}
+
+/// Emits during watch: diagnostics are printed while the last-known-good
+/// output is left intact, and the watcher keeps running. Returns whether
+/// output was rewritten.
+fn emit_watch(compiler: &mut Compiler, options: &Options) -> Result<bool, CliError> {
+    emit_inner(compiler, options, true)
+}
+
+fn emit_inner(compiler: &mut Compiler, options: &Options, watch: bool) -> Result<bool, CliError> {
     let result = compiler.build();
     let stylesheet = transform_authored_stylesheets(compiler, options)?;
     let mode = compiler.config().serialization_mode();
@@ -643,15 +690,19 @@ fn emit(compiler: &mut Compiler, options: &Options) -> Result<(), CliError> {
     } else {
         format!("{}{separator}{}", stylesheet.css, result.css())
     };
-    if let Some(path) = &options.output {
-        fs::write(path, css.as_bytes())
-            .map_err(|source| CliError::Io { path: path.clone(), source })?;
-    } else {
-        let mut stdout = io::stdout().lock();
-        stdout
-            .write_all(css.as_bytes())
-            .and_then(|_| stdout.write_all(b"\n"))
-            .map_err(|source| CliError::Io { path: PathBuf::from("<stdout>"), source })?;
+    let failed = !result.diagnostics().is_empty() || !stylesheet.diagnostics.is_empty();
+    let keep_last_good = watch && failed;
+    if !keep_last_good {
+        if let Some(path) = &options.output {
+            fs::write(path, css.as_bytes())
+                .map_err(|source| CliError::Io { path: path.clone(), source })?;
+        } else {
+            let mut stdout = io::stdout().lock();
+            stdout
+                .write_all(css.as_bytes())
+                .and_then(|_| stdout.write_all(b"\n"))
+                .map_err(|source| CliError::Io { path: PathBuf::from("<stdout>"), source })?;
+        }
     }
     for diagnostic in result.diagnostics().iter().chain(stylesheet.diagnostics.iter()) {
         let source = diagnostic.source().map_or_else(|| "<source>".to_owned(), ToString::to_string);
@@ -677,11 +728,10 @@ fn emit(compiler: &mut Compiler, options: &Options) -> Result<(), CliError> {
             stats.rules_removed(),
         );
     }
-    if result.diagnostics().is_empty() && stylesheet.diagnostics.is_empty() {
-        Ok(())
-    } else {
-        Err(CliError::Diagnostics)
+    if failed && !watch {
+        return Err(CliError::Diagnostics);
     }
+    Ok(!keep_last_good)
 }
 
 struct AuthoredStylesheetOutput {
@@ -829,18 +879,21 @@ fn print_help() {
 #[cfg(test)]
 mod tests {
     use std::{
-        fs,
+        collections::BTreeMap,
+        fs, io,
         path::PathBuf,
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
     use super::{
-        collect_files, config_changed, make_compiler, parse_options, reload_config, run,
-        stable_path, transform_authored_stylesheets, Compiler, CompilerConfig,
-        CssSerializationMode, Event, Options,
+        collect_files, config_changed, emit_watch, handle_watch_batch, is_recoverable_watch_error,
+        make_compiler, parse_options, refresh_sources, reload_config, run, stable_path,
+        transform_authored_stylesheets, CliError, Compiler, CompilerConfig, CssSerializationMode,
+        Event, Options,
     };
     use notify::EventKind;
-    use utilitycss_compiler::SourceInput;
+    use utilitycss_compiler::{CompilerError, SourceInput};
+    use utilitycss_config::ConfigError;
     use utilitycss_span::SourceId;
 
     #[test]
@@ -953,6 +1006,162 @@ mod tests {
         reload_config(&mut compiler, &options).expect("updated config loads");
 
         assert!(compiler.build().css().contains("background-color:blue"));
+        fs::remove_dir_all(root).expect("test directory is removed");
+    }
+
+    fn watch_test_options(root: &std::path::Path, output: PathBuf) -> Options {
+        Options {
+            inputs: vec![root.to_owned()],
+            stylesheet_inputs: Vec::new(),
+            output: Some(output),
+            mode: Some(CssSerializationMode::Minified),
+            config: None,
+            stats: false,
+            watch: true,
+            once: false,
+            interval: Duration::from_millis(250),
+        }
+    }
+
+    fn watch_test_root(name: &str) -> PathBuf {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is after the Unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("utilitycss-cli-{name}-{suffix}"));
+        fs::create_dir_all(&root).expect("test directory is created");
+        root
+    }
+
+    #[test]
+    fn htm_sources_are_collected_like_html() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is after the Unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("utilitycss-cli-htm-{suffix}"));
+        fs::create_dir_all(&root).expect("test directory is created");
+        for name in ["page.html", "lower.htm", "upper.HTM", "notes.txt"] {
+            fs::write(root.join(name), "<div></div>").expect("fixture is written");
+        }
+
+        let files = collect_files(std::slice::from_ref(&root), None).expect("inputs collect");
+        let names = files
+            .iter()
+            .map(|path| path.file_name().expect("file has a name").to_owned())
+            .collect::<Vec<_>>();
+        for expected in ["page.html", "lower.htm", "upper.HTM"] {
+            assert!(names.iter().any(|name| name == expected), "collects {expected}: {names:?}");
+        }
+        assert!(!names.iter().any(|name| name == "notes.txt"), "skips txt: {names:?}");
+
+        fs::remove_dir_all(root).expect("test directory is removed");
+    }
+
+    #[test]
+    fn watch_error_classification_matches_recovery_policy() {
+        assert!(is_recoverable_watch_error(&CliError::Compiler(CompilerError::EmptySourceId)));
+        assert!(is_recoverable_watch_error(&CliError::Extraction("too large".to_owned())));
+        assert!(is_recoverable_watch_error(&CliError::Diagnostics));
+        assert!(is_recoverable_watch_error(&CliError::Io {
+            path: PathBuf::from("input.html"),
+            source: io::Error::new(io::ErrorKind::InvalidData, "undecodable bytes"),
+        }));
+
+        assert!(!is_recoverable_watch_error(&CliError::Usage("broken".to_owned())));
+        assert!(!is_recoverable_watch_error(&CliError::Config(ConfigError::InvalidJson(
+            "broken".to_owned()
+        ))));
+        for kind in [io::ErrorKind::NotFound, io::ErrorKind::PermissionDenied] {
+            assert!(!is_recoverable_watch_error(&CliError::Io {
+                path: PathBuf::from("input.html"),
+                source: io::Error::new(kind, "environmental failure"),
+            }));
+        }
+    }
+
+    #[test]
+    fn watch_batch_survives_invalid_edits_and_keeps_last_good_output() {
+        let root = watch_test_root("watch-invalid");
+        let input = root.join("input.html");
+        let output = root.join("output.css");
+        fs::write(&input, "<div class=\"p-4\"></div>").expect("seed input is written");
+        let options = watch_test_options(&root, output.clone());
+        let mut compiler = make_compiler(&options).expect("default config loads");
+        let mut known = BTreeMap::new();
+        refresh_sources(&mut compiler, &options.inputs, options.output.as_deref(), &mut known)
+            .expect("initial load succeeds");
+        assert!(emit_watch(&mut compiler, &options).expect("initial emit succeeds"));
+        let last_good = fs::read_to_string(&output).expect("output is written");
+        assert!(last_good.contains("padding:1rem"), "initial css: {last_good}");
+
+        fs::write(&input, "<div class=\"p-[]\"></div>").expect("invalid edit is written");
+        let mut event = Event::new(EventKind::Any);
+        event.paths.push(input.clone());
+        assert!(
+            !handle_watch_batch(&mut compiler, &[event], &options, &mut known)
+                .expect("invalid edits do not stop the watcher"),
+            "diagnostics must not rewrite output"
+        );
+        assert_eq!(
+            fs::read_to_string(&output).expect("output is readable"),
+            last_good,
+            "last-known-good output stays intact"
+        );
+
+        fs::write(&input, "<div class=\"p-8\"></div>").expect("fixed edit is written");
+        let mut event = Event::new(EventKind::Any);
+        event.paths.push(input.clone());
+        assert!(
+            handle_watch_batch(&mut compiler, &[event], &options, &mut known)
+                .expect("fixed edits rebuild"),
+            "fixed edits rewrite output"
+        );
+        let rebuilt = fs::read_to_string(&output).expect("output is rewritten");
+        assert!(rebuilt.contains("padding:2rem"), "rebuilt css: {rebuilt}");
+
+        fs::remove_dir_all(root).expect("test directory is removed");
+    }
+
+    #[test]
+    fn watch_batch_reports_undecodable_sources_without_stopping() {
+        let root = watch_test_root("watch-binary");
+        let input = root.join("input.html");
+        let output = root.join("output.css");
+        fs::write(&input, "<div class=\"p-4\"></div>").expect("seed input is written");
+        let options = watch_test_options(&root, output.clone());
+        let mut compiler = make_compiler(&options).expect("default config loads");
+        let mut known = BTreeMap::new();
+        refresh_sources(&mut compiler, &options.inputs, options.output.as_deref(), &mut known)
+            .expect("initial load succeeds");
+        emit_watch(&mut compiler, &options).expect("initial emit succeeds");
+        let last_good = fs::read_to_string(&output).expect("output is written");
+
+        fs::write(&input, [0xff_u8, 0xfe, 0x00, 0x28]).expect("binary edit is written");
+        let mut event = Event::new(EventKind::Any);
+        event.paths.push(input.clone());
+        handle_watch_batch(&mut compiler, &[event], &options, &mut known)
+            .expect("undecodable edits do not stop the watcher");
+        assert_eq!(
+            fs::read_to_string(&output).expect("output is readable"),
+            last_good,
+            "last-known-good output stays intact"
+        );
+
+        fs::remove_dir_all(root).expect("test directory is removed");
+    }
+
+    #[test]
+    fn watch_batch_propagates_environmental_failures() {
+        let root = watch_test_root("watch-io-error");
+        let options = watch_test_options(&root, root.join("missing-directory").join("output.css"));
+        let mut compiler = make_compiler(&options).expect("default config loads");
+        let mut known = BTreeMap::new();
+
+        let error = handle_watch_batch(&mut compiler, &[], &options, &mut known)
+            .expect_err("missing output directory stops the watcher");
+        assert!(matches!(error, CliError::Io { .. }));
+
         fs::remove_dir_all(root).expect("test directory is removed");
     }
 }

@@ -84,7 +84,7 @@ export interface CompilerOptions {
 
 /** A thin lifecycle adapter over the native Rust compiler. */
 export class Compiler {
-  private readonly native: NativeCompiler;
+  private native: NativeCompiler | undefined;
   private disposed = false;
 
   /** Creates an adapter around one native compiler instance. */
@@ -99,24 +99,23 @@ export class Compiler {
     path?: string,
     candidates?: readonly CandidateInput[]
   ): void {
-    this.assertActive();
-    const extracted = candidates ?? this.native.extractCandidates?.(content, path);
-    this.native.updateSource(id, content, path, extracted);
+    const native = this.activeNative();
+    const extracted = candidates ?? native.extractCandidates?.(content, path);
+    native.updateSource(id, content, path, extracted);
   }
 
   /** Removes source content and returns whether the source existed. */
   public removeSource(id: string): boolean {
-    this.assertActive();
-    return this.native.removeSource(id);
+    return this.activeNative().removeSource(id);
   }
 
   /** Extracts candidates through the native host-language extractor. */
   public extractCandidates(content: string, path?: string): readonly CandidateInput[] {
-    this.assertActive();
-    if (!this.native.extractCandidates) {
+    const native = this.activeNative();
+    if (!native.extractCandidates) {
       throw new Error("native compiler does not expose candidate extraction");
     }
-    return this.native.extractCandidates(content, path).map(candidate => ({
+    return native.extractCandidates(content, path).map(candidate => ({
       raw: candidate.raw,
       start: candidate.start,
       end: candidate.end,
@@ -126,55 +125,60 @@ export class Compiler {
 
   /** Builds CSS and normalizes the native result shape. */
   public build(): BuildResult {
-    this.assertActive();
-    return normalizeBuildResult(this.native.build());
+    return normalizeBuildResult(this.activeNative().build());
   }
 
   /** Explains one candidate through the native registry-backed introspection API. */
   public explain(candidate: string): IntrospectionResult {
-    this.assertActive();
-    if (!this.native.explain) {
+    const native = this.activeNative();
+    if (!native.explain) {
       throw new Error("native compiler does not expose candidate explanation");
     }
-    return normalizeIntrospectionResult(this.native.explain(candidate));
+    return normalizeIntrospectionResult(native.explain(candidate));
   }
 
   /** Validates one candidate through the native registry-backed introspection API. */
   public validate(candidate: string): IntrospectionResult {
-    this.assertActive();
-    if (!this.native.validate) {
+    const native = this.activeNative();
+    if (!native.validate) {
       throw new Error("native compiler does not expose candidate validation");
     }
-    return normalizeIntrospectionResult(this.native.validate(candidate));
+    return normalizeIntrospectionResult(native.validate(candidate));
   }
 
   /** Returns the active machine-readable capability manifest. */
   public capabilities(): IntrospectionResult {
-    this.assertActive();
-    if (!this.native.capabilities) {
+    const native = this.activeNative();
+    if (!native.capabilities) {
       throw new Error("native compiler does not expose capability metadata");
     }
-    return normalizeIntrospectionResult(this.native.capabilities());
+    return normalizeIntrospectionResult(native.capabilities());
   }
 
   /** Transforms authored CSS and normalizes native stylesheet diagnostics. */
   public transformStylesheet(id: string, content: string, path?: string): StylesheetResult {
-    this.assertActive();
-    if (!this.native.transformStylesheet) {
+    const native = this.activeNative();
+    if (!native.transformStylesheet) {
       throw new Error("native compiler does not expose stylesheet transformation");
     }
-    return normalizeStylesheetResult(this.native.transformStylesheet(id, content, path));
+    return normalizeStylesheetResult(native.transformStylesheet(id, content, path));
   }
 
-  /** Releases this adapter's native compiler handle. */
+  /**
+   * Releases this adapter's native compiler handle. The native reference is
+   * dropped so the runtime can reclaim it; every later call throws.
+   */
   public dispose(): void {
+    this.native = undefined;
     this.disposed = true;
   }
 
-  private assertActive(): void {
-    if (this.disposed) {
+  private activeNative(): NativeCompiler {
+    const native = this.disposed ? undefined : this.native;
+    if (!native) {
       throw new Error("utilitycss compiler has been disposed");
     }
+    return native;
   }
 }
 

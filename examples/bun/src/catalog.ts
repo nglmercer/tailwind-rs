@@ -30,6 +30,7 @@ import {
   ToastPage,
   BannerPage
 } from "./docs/DemoPages.tsx";
+import { CompilerLabPage } from "./lab/CompilerLab.tsx";
 
 export const categoryDefinitions = [
   { value: "actions", label: "Actions" },
@@ -38,7 +39,8 @@ export const categoryDefinitions = [
   { value: "feedback", label: "Feedback" },
   { value: "data-input", label: "Data input" },
   { value: "layout", label: "Layout" },
-  { value: "mockup", label: "Mockup" }
+  { value: "mockup", label: "Mockup" },
+  { value: "tools", label: "Tools" }
 ] as const;
 
 export type Category = typeof categoryDefinitions[number]["value"];
@@ -86,7 +88,9 @@ export const catalog: readonly CatalogItem[] = [
   { slug: "toast", name: "Toast", category: "feedback", description: "Offer lightweight confirmation without interrupting the current task.", demo: ToastPage, code: `<Toast>Item moved successfully.</Toast>` },
 
   { slug: "drawer", name: "Drawer", category: "layout", description: "Reveal contextual content from the edge of the viewport.", demo: DrawerPage, code: `<Drawer open={open} onClose={close}>...</Drawer>` },
-  { slug: "jumbotron", name: "Hero", category: "layout", description: "Create a prominent introductory block for a page or campaign.", demo: JumbotronPage, code: `<Hero title="Build with primitives" />` }
+  { slug: "jumbotron", name: "Hero", category: "layout", description: "Create a prominent introductory block for a page or campaign.", demo: JumbotronPage, code: `<Hero title="Build with primitives" />` },
+
+  { slug: "compiler-lab", name: "Compiler Lab", category: "tools", description: "Compile live source against the demo config: generated CSS, diagnostics, browser targets, and per-candidate validation.", demo: CompilerLabPage, code: `POST /api/compile\n{ "source": "<div class=\\"flex\\">…", "browserTarget": "safari-15", "mode": "markup" }`, css: `.flex {\n  display: flex;\n}` }
 ];
 
 export function getCategoryLabel(category: Category): string {

@@ -72,7 +72,7 @@ export function utilitycss(options: ViteOptions = {}): UtilityCssVitePlugin {
   const compiler: Compiler = createCompiler(options);
   const virtualModuleId = options.virtualModuleId ?? "virtual:utilitycss.css";
   const resolvedVirtualId = `\0${virtualModuleId}`;
-  const include = options.include ?? [/\.(?:html|astro|(?:m|c)?jsx?|(?:m|c)?tsx?|vue|svelte)$/];
+  const include = options.include ?? [/\.(?:html?|astro|(?:m|c)?jsx?|(?:m|c)?tsx?|vue|svelte)$/i];
 
   const isCss = (id: string): boolean => /\.css(?:$|[?#])/i.test(id);
 
@@ -110,7 +110,22 @@ export function utilitycss(options: ViteOptions = {}): UtilityCssVitePlugin {
       return id === virtualModuleId ? resolvedVirtualId : undefined;
     },
     load(id: string): string | undefined {
-      return id === resolvedVirtualId ? compiler.build().css : undefined;
+      if (id !== resolvedVirtualId) {
+        return undefined;
+      }
+      const result = compiler.build();
+      const errors = result.diagnostics.filter(
+        (diagnostic) => diagnostic.severity === "error" || diagnostic.severity === undefined
+      );
+      for (const diagnostic of result.diagnostics) {
+        if (diagnostic.severity !== "error" && diagnostic.severity !== undefined) {
+          console.warn(formatDiagnostic(diagnostic));
+        }
+      }
+      if (errors.length > 0) {
+        throw new Error(errors.map((diagnostic) => formatDiagnostic(diagnostic)).join("\n"));
+      }
+      return result.css;
     },
     async transform(this: VitePluginContext, code: string, id: string): Promise<ViteTransformResult | null> {
       const normalizedId = normalizeModuleId(id);
@@ -140,6 +155,7 @@ export function utilitycss(options: ViteOptions = {}): UtilityCssVitePlugin {
         } else {
           compiler.updateSource(normalizedId, await context.read(), normalizedId);
         }
+        reportHotUpdateDiagnostics(compiler.build().diagnostics, context);
         const virtualModule = await context.server.moduleGraph.getModuleById(resolvedVirtualId);
         if (virtualModule) {
           context.server.moduleGraph.invalidateModule(virtualModule);

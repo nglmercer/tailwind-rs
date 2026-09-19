@@ -3,7 +3,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
-use std::{collections::BTreeMap, error::Error, fmt};
+use std::{cmp::Ordering, collections::BTreeMap, error::Error, fmt};
 
 use serde::Serialize;
 use utilitycss_css_ir::CssRule;
@@ -753,18 +753,73 @@ fn apply_selector(selector: &str, base: &str) -> String {
     }
 }
 
-fn breakpoint_order(name: &str, theme: &Theme) -> u16 {
-    if theme.breakpoint(name).is_some() {
-        match name {
-            "sm" => 200,
-            "md" => 210,
-            "lg" => 220,
-            "xl" => 230,
-            _ => 240,
-        }
-    } else {
-        0
+/// Base ordering rank assigned to the narrowest configured breakpoint.
+const BREAKPOINT_RANK_BASE: u16 = 200;
+/// Rank spacing between adjacent configured breakpoints.
+const BREAKPOINT_RANK_STEP: u16 = 10;
+
+/// Parses a breakpoint value into min-width pixels.
+///
+/// `px` values are used directly, `rem`/`em` scale by the conventional 16px
+/// root, and unitless numbers are read as pixels. Anything else returns `None`
+/// so the breakpoint sorts deterministically after all parseable values.
+fn breakpoint_width_px(value: &str) -> Option<f32> {
+    let trimmed = value.trim();
+    let split = trimmed
+        .char_indices()
+        .find(|(_, character)| !character.is_ascii_digit() && !matches!(character, '.' | '+' | '-'))
+        .map_or(trimmed.len(), |(index, _)| index);
+    let (number, unit) = trimmed.split_at(split);
+    if number.is_empty() {
+        return None;
     }
+    let magnitude: f32 = number.parse().ok()?;
+    if !magnitude.is_finite() {
+        return None;
+    }
+    let unit = unit.trim();
+    let scale = if unit.eq_ignore_ascii_case("px") || unit.is_empty() {
+        1.0
+    } else if unit.eq_ignore_ascii_case("rem") || unit.eq_ignore_ascii_case("em") {
+        16.0
+    } else {
+        return None;
+    };
+    Some(magnitude * scale)
+}
+
+/// Returns the deterministic ordering rank for a theme breakpoint.
+///
+/// Configured breakpoints rank by ascending min-width value so custom
+/// breakpoints interleave correctly with the built-in set. Equal widths break
+/// ties by name, and unparseable values sort after all parseable ones, also by
+/// name. Returns `None` when `name` is not a configured breakpoint.
+#[must_use]
+pub fn breakpoint_rank(name: &str, theme: &Theme) -> Option<u16> {
+    let tokens = theme.namespace("breakpoint")?;
+    if !tokens.contains_key(name) {
+        return None;
+    }
+    let mut ordered: Vec<(&str, Option<f32>)> =
+        tokens.iter().map(|(key, value)| (key.as_str(), breakpoint_width_px(value))).collect();
+    ordered.sort_by(|left, right| {
+        match (left.1, right.1) {
+            (Some(left_px), Some(right_px)) => {
+                left_px.partial_cmp(&right_px).unwrap_or(Ordering::Equal)
+            }
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
+        }
+        .then_with(|| left.0.cmp(right.0))
+    });
+    ordered.iter().position(|(key, _)| *key == name).map(|index| {
+        BREAKPOINT_RANK_BASE.saturating_add((index as u16).saturating_mul(BREAKPOINT_RANK_STEP))
+    })
+}
+
+fn breakpoint_order(name: &str, theme: &Theme) -> u16 {
+    breakpoint_rank(name, theme).unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -860,6 +915,46 @@ mod tests {
             .expect_err("theme breakpoints are validated before media emission");
 
         assert_eq!(error.kind(), VariantErrorKind::UnsafeSelector);
+    }
+
+    #[test]
+    fn custom_breakpoints_rank_by_min_width_value() {
+        let theme = Theme::builder()
+            .breakpoint("xs", "320px")
+            .breakpoint("tablet", "48rem")
+            .breakpoint("2xl", "1536px")
+            .build();
+        let registry = VariantRegistry::new();
+        let rank = |candidate: &str| {
+            let parsed = parse(candidate).expect("candidate is valid");
+            registry.order(&parsed, &theme)
+        };
+
+        // Width order: xs 320 < sm 640 < md 768 = tablet 768 < lg 1024 < xl 1280 < 2xl 1536.
+        // The md/tablet tie breaks deterministically by name ("md" < "tablet").
+        assert_eq!(rank("xs:p-4"), 200);
+        assert_eq!(rank("sm:p-4"), 210);
+        assert_eq!(rank("md:p-4"), 220);
+        assert_eq!(rank("tablet:p-4"), 230);
+        assert_eq!(rank("lg:p-4"), 240);
+        assert_eq!(rank("xl:p-4"), 250);
+        assert_eq!(rank("2xl:p-4"), 260);
+    }
+
+    #[test]
+    fn default_breakpoints_keep_historical_ranks() {
+        let theme = Theme::default();
+        let registry = VariantRegistry::new();
+        let rank = |candidate: &str| {
+            let parsed = parse(candidate).expect("candidate is valid");
+            registry.order(&parsed, &theme)
+        };
+
+        assert_eq!(
+            (rank("sm:p-4"), rank("md:p-4"), rank("lg:p-4"), rank("xl:p-4")),
+            (200, 210, 220, 230)
+        );
+        assert_eq!(rank("unknown:p-4"), 0);
     }
 
     #[test]

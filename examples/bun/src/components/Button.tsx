@@ -1,5 +1,6 @@
 import type { ComponentChildren, JSX } from "preact";
 import { Icon } from "./Icon.tsx";
+import { cn } from "../lib/cn.ts";
 
 type ButtonVariant = "primary" | "secondary" | "outline" | "ghost" | "danger" | "success";
 type ButtonSize = "xs" | "sm" | "md" | "lg";
@@ -29,7 +30,7 @@ type ButtonProps = Omit<JSX.ButtonHTMLAttributes<HTMLButtonElement>, "className"
 
 export function Button({ variant = "primary", size = "md", className = "", children, ...props }: ButtonProps) {
   return (
-    <button {...props} className={`${variantClasses[variant]} ${sizeClasses[size]} ${className}`.trim().replace(/\s+/g, " ")}>
+    <button {...props} className={cn(variantClasses[variant], sizeClasses[size], className)}>
       {children}
     </button>
   );

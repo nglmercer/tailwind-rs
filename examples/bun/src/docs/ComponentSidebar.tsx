@@ -2,6 +2,7 @@ import type { CatalogItem, Category } from "../catalog.ts";
 import { categoryDefinitions } from "../catalog.ts";
 import { formatHashRoute } from "../hooks/useHashRoute.ts";
 import { Icon } from "../components/Icon.tsx";
+import { cn } from "../lib/cn.ts";
 
 interface ComponentSidebarProps {
   readonly category: Category;
@@ -46,7 +47,7 @@ export function ComponentSidebar({ category, items, activeSlug, searchQuery, onN
             {items.map(item => (
               <li key={item.slug}>
                 <a
-                  className={`component-sidebar-link ${item.slug === activeSlug ? "component-sidebar-link-active" : ""}`.trim()}
+                  className={cn("component-sidebar-link", item.slug === activeSlug && "component-sidebar-link-active")}
                   href={formatHashRoute(item.category, item.slug)}
                   aria-current={item.slug === activeSlug ? "page" : undefined}
                   onClick={event => {

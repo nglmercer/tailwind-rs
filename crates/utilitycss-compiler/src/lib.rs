@@ -1237,7 +1237,8 @@ impl Compiler {
                     names: vec![name.clone()],
                     description: "Responsive breakpoint variant".to_owned(),
                     composable: true,
-                    ordering: 240,
+                    ordering: utilitycss_variants::breakpoint_rank(name, self.config.theme())
+                        .map_or(0, u32::from),
                     allowed_nesting: vec!["named".to_owned()],
                     compatibility_profile: "native".to_owned(),
                     examples: vec![format!("{name}:p-4")],
@@ -2122,6 +2123,28 @@ mod tests {
 
         assert_ne!(first.css(), second.css());
         assert!(second.stats().candidates_parsed() > 0);
+    }
+
+    #[test]
+    fn overlapping_custom_breakpoints_emit_in_min_width_order() {
+        let theme = utilitycss_theme::Theme::builder()
+            .breakpoint("xs", "320px")
+            .breakpoint("2xl", "1536px")
+            .build();
+        let mut compiler = Compiler::new(CompilerConfig::new().with_theme(theme));
+        let source = SourceInput::new(
+            SourceId::new("src/app.html"),
+            r#"<div class="2xl:p-4 md:p-4 xs:p-4"></div>"#,
+        );
+        compiler.update_source(source).expect("source is valid");
+
+        let css = compiler.build().css().to_owned();
+        let xs = css.find("(min-width: 320px)").expect("xs rule is emitted");
+        let md = css.find("(min-width: 768px)").expect("md rule is emitted");
+        let xxl = css.find("(min-width: 1536px)").expect("2xl rule is emitted");
+
+        assert!(xs < md && md < xxl, "breakpoints must cascade by width: {css}");
+        assert!(css.contains(r".\32 xl\:p-4"), "leading-digit selector escapes: {css}");
     }
 
     #[test]

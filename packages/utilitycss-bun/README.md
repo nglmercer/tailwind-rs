@@ -43,7 +43,7 @@ dependency graph tracking removes deleted modules. Imported `.css` files are tra
 the same native `transformStylesheet` API used by Node and Vite.
 
 Pass `debug: true` to log build numbers, retained source counts, successful rebuilds, and HMR
-failures. Diagnostics include source locations and short code frames when the source is available.
+failures. Diagnostics include source locations when the source is available.
 An invalid incremental build is rejected while Bun keeps the last successful bundle active, so the
 development process can recover on the next save.
 

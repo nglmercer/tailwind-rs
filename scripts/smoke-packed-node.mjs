@@ -1,13 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
-const npm = process.env.npm_execpath
-  ? [process.execPath, process.env.npm_execpath]
-  : process.platform === "win32"
-    ? [process.execPath, join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js")]
-    : ["npm"];
+import { npmCommand } from "./lib/npm.mjs";
+
+const npm = npmCommand();
 const root = mkdtempSync(join(tmpdir(), "utilitycss-packed-smoke-"));
 try {
   const napiTarball = pack("@utilitycss/napi");

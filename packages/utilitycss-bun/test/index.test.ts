@@ -378,6 +378,124 @@ test("recovers after an incremental diagnostic and handles graph creation/remova
   }
 });
 
+test("ignores fragments, URLs, and missing assets when pruning the source graph", async () => {
+  const poisonedTemplate =
+    'const template = \'<a href="#section"><img src="/assets/logo.png">' +
+    '<img src="missing.png"><img src="https://cdn.example/x.png"><img src="data:image/png;base64,AAA">\';';
+  const root = await makeProject({
+    "entry.ts": `import "./used.ts";\nimport "./stale.ts";\nimport "utilitycss";\n${poisonedTemplate}\n`,
+    "used.ts": 'export const classes = "p-4";',
+    "stale.ts": 'export const classes = "flex";'
+  });
+  const plugin = utilitycss({ native: FakeNativeCompiler });
+  try {
+    const first = await build(root, plugin, "entry.ts");
+    assert.match(first.css, /\.flex\s*\{/);
+
+    await writeFile(
+      join(root, "entry.ts"),
+      `import "./used.ts";\nimport "utilitycss";\n${poisonedTemplate}\n`
+    );
+    const second = await build(root, plugin, "entry.ts");
+    assert.equal(second.result.success, true, JSON.stringify(second.result.logs));
+    assert.match(second.css, /\.p-4\s*\{/);
+    assert.doesNotMatch(second.css, /\.flex\s*\{/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("prunes unreachable modules despite real HTML fragment and asset references", async () => {
+  const root = await makeProject({
+    "index.html":
+      '<link rel="stylesheet" href="utilitycss">' +
+      '<a href="#section">section</a>' +
+      '<img src="logo.png" alt="">' +
+      '<img src="https://cdn.example/x.png" alt="">' +
+      '<img src="data:image/png;base64,AAA" alt="">' +
+      '<main class="p-4"></main>',
+    "logo.png": "fake-png-bytes",
+    "entry.ts": 'import "./used.ts";\nimport "./stale.ts";\nimport "utilitycss";\n',
+    "used.ts": 'export const classes = "grid";',
+    "stale.ts": 'export const classes = "flex";'
+  });
+  const plugin = utilitycss({ native: FakeNativeCompiler });
+  const buildAll = async () => {
+    const result = await Bun.build({
+      entrypoints: [join(root, "index.html"), join(root, "entry.ts")],
+      outdir: join(root, "out"),
+      plugins: [plugin],
+      target: "browser"
+    });
+    const outputs = await Promise.all(result.outputs.map((artifact) => artifact.text()));
+    const css = outputs.find((contents, index) => result.outputs[index].path.endsWith(".css")) ?? "";
+    return { result, css };
+  };
+  try {
+    const first = await buildAll();
+    assert.equal(first.result.success, true, JSON.stringify(first.result.logs));
+    assert.match(first.css, /\.flex\s*\{/);
+
+    await writeFile(join(root, "entry.ts"), 'import "./used.ts";\nimport "utilitycss";\n');
+    const second = await buildAll();
+    assert.equal(second.result.success, true, JSON.stringify(second.result.logs));
+    assert.match(second.css, /\.p-4\s*\{/);
+    assert.match(second.css, /\.grid\s*\{/);
+    assert.doesNotMatch(second.css, /\.flex\s*\{/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("drops deleted files from the graph and recovers when they return", async () => {
+  const root = await makeProject({
+    "entry.ts": 'import "./used.ts";\nimport "./doomed.ts";\nimport "utilitycss";\n',
+    "used.ts": 'export const classes = "p-4";',
+    "doomed.ts": 'export const classes = "flex";'
+  });
+  const plugin = utilitycss({ native: FakeNativeCompiler });
+  try {
+    const first = await build(root, plugin, "entry.ts");
+    assert.match(first.css, /\.flex\s*\{/);
+
+    await rm(join(root, "doomed.ts"), { force: true });
+    await writeFile(join(root, "entry.ts"), 'import "./used.ts";\nimport "utilitycss";\n');
+    const second = await build(root, plugin, "entry.ts");
+    assert.equal(second.result.success, true, JSON.stringify(second.result.logs));
+    assert.match(second.css, /\.p-4\s*\{/);
+    assert.doesNotMatch(second.css, /\.flex\s*\{/);
+
+    await writeFile(join(root, "doomed.ts"), 'export const classes = "flex";');
+    await writeFile(
+      join(root, "entry.ts"),
+      'import "./used.ts";\nimport "./doomed.ts";\nimport "utilitycss";\n'
+    );
+    const third = await build(root, plugin, "entry.ts");
+    assert.equal(third.result.success, true, JSON.stringify(third.result.logs));
+    assert.match(third.css, /\.flex\s*\{/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("extracts classes from imported .htm modules like .html", async () => {
+  // NOTE: .htm files reach the adapter through imports. Bun 1.4.0 crashes on
+  // Windows when an .htm file is used as a bundler entrypoint, so entries use
+  // .html (covered above) while this test pins adapter-level .htm parity.
+  const root = await makeProject({
+    "entry.ts": 'import "./page.htm";\nimport "utilitycss";\n',
+    "page.htm": '<main class="p-4"></main>'
+  });
+  const plugin = utilitycss({ native: FakeNativeCompiler });
+  try {
+    const { result, css } = await build(root, plugin, "entry.ts");
+    assert.equal(result.success, true, JSON.stringify(result.logs));
+    assert.match(css, /\.p-4\s*\{/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 async function makeProject(files: Record<string, string>): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "utilitycss-bun-test-"));
   await mkdir(join(root, "out"), { recursive: true });

@@ -1,12 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
-const npm = process.env.npm_execpath
-  ? [process.execPath, process.env.npm_execpath]
-  : process.platform === "win32"
-    ? [process.execPath, join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js")]
-    : ["npm"];
+import { npmCommand } from "./lib/npm.mjs";
+
+const npm = npmCommand();
 const packages = [
   { name: "@utilitycss/napi", cwd: "packages/utilitycss-napi", api: "index.d.ts" },
   { name: "@utilitycss/node", cwd: "packages/utilitycss-node", api: "dist/index.d.ts" },

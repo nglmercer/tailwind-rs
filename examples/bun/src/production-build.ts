@@ -1,3 +1,4 @@
+import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { utilitycss } from "../../../packages/utilitycss-bun/src/index.ts";
 
@@ -10,6 +11,12 @@ export interface ProductionBuildOptions {
 
 /** Builds the fullstack example with Bun's bundler and the utilitycss plugin. */
 export async function buildProduction(options: ProductionBuildOptions = {}) {
+  // Bun emits content-hashed chunks without cleaning the outdir, so stale CSS
+  // from previous builds would linger and could be mistaken for fresh output.
+  // In-memory verification builds leave any existing output untouched.
+  if (options.write ?? true) {
+    await rm(outputDirectory, { recursive: true, force: true });
+  }
   const config = await Bun.file(resolve(projectRoot, "utilitycss.config.css")).text();
   const buildOptions = {
     entrypoints: [resolve(projectRoot, "src", "server.ts")],
@@ -17,6 +24,10 @@ export async function buildProduction(options: ProductionBuildOptions = {}) {
     target: "bun",
     minify: true,
     plugins: [utilitycss({ browserTarget: "modern", config, pretty: false })],
+    // The Lab API route needs the native binding at runtime; bundling a
+    // `.node` binary is unsupported, so it stays external and resolves from
+    // the example's node_modules next to the emitted server bundle.
+    external: ["@utilitycss/napi"],
     write: options.write ?? true
   } as Bun.BuildConfig & { write?: boolean };
 

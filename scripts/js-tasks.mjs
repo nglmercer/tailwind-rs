@@ -46,6 +46,9 @@ const tasks = {
   },
   test() {
     runCommand(nodeExecutable(), ["--test", "scripts/exec.test.mjs"], { cwd: repositoryRoot });
+    runCommand(nodeExecutable(), ["--test", "scripts/repo-consistency.test.mjs"], {
+      cwd: repositoryRoot
+    });
     run("@utilitycss/node", "build");
     run("@utilitycss/vite", "build");
     run("@utilitycss/wasm", "build");

@@ -1,19 +1,13 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 import { nodeExecutable, spawnEnv } from "./lib/exec.mjs";
+import { npmCommand } from "./lib/npm.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
-// `npm_execpath` points at whichever runner started this script; under `bun run`
-// that is the Bun binary, not npm-cli.js, so only honour it when it really is npm.
-const npmCli = /npm-cli\.js$/.test(process.env.npm_execpath ?? "") ? process.env.npm_execpath : undefined;
-const node = nodeExecutable();
-const bundledNpmCli =
-  process.platform === "win32" && node !== "node"
-    ? join(dirname(node), "node_modules", "npm", "bin", "npm-cli.js")
-    : undefined;
-const npm = npmCli ? [node, npmCli] : bundledNpmCli ? [node, bundledNpmCli] : ["npm"];
+const npm = npmCommand();
+const strict = process.argv.includes("--strict");
 const results = [];
 let failures = 0;
 
@@ -22,8 +16,8 @@ function pass(label) {
   console.log(`PASS ${label}`);
 }
 
-function skip(label, reason) {
-  results.push({ status: "SKIP", label, reason });
+function skip(label, reason, options = {}) {
+  results.push({ status: "SKIP", label, reason, lenient: options.lenient ?? false });
   console.log(`SKIP ${label} (${reason})`);
 }
 
@@ -44,7 +38,7 @@ function commandAvailable(command, args = ["--version"]) {
 
 function run(label, command, args, options = {}) {
   if (options.when && !options.when()) {
-    skip(label, options.skipReason ?? `${command} is unavailable`);
+    skip(label, options.skipReason ?? `${command} is unavailable`, { lenient: options.lenient ?? false });
     return false;
   }
 
@@ -151,7 +145,7 @@ function runWasmGate() {
   });
 }
 
-console.log("utilitycss local release check");
+console.log(`utilitycss local release check${strict ? " (strict: required skips fail)" : ""}`);
 
 const npmReady = runNpm("Clean npm install", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]);
 run("Rust format", "cargo", ["fmt", "--all", "--", "--check"]);
@@ -195,7 +189,6 @@ runWorkspaceScript("Node @apply smoke", "test", "@utilitycss/node");
 runReleaseNpm("JavaScript dependency audit", ["audit", "--audit-level=high"]);
 runReleaseNpm("Package-content validation", ["run", "validate:packages"]);
 runReleaseNpm("Vite production smoke", ["run", "smoke:vite"]);
-runReleaseNpm("Vite @apply smoke", ["run", "smoke:vite"]);
 
 const currentPlatform = currentPlatformLabel();
 let currentPlatformEvidence = false;
@@ -213,7 +206,11 @@ if (currentPlatform) {
     });
   }
 } else {
-  skip("Current-platform native smoke", `${process.platform}/${process.arch} is not an advertised target`);
+  skip(
+    "Current-platform native smoke",
+    `${process.platform}/${process.arch} is not an advertised target`,
+    { lenient: true }
+  );
 }
 
 for (const [label, platform, arch] of [
@@ -229,7 +226,7 @@ for (const [label, platform, arch] of [
       skip(label, "current-platform native smoke did not complete");
     }
   } else {
-    skip(label, `requires ${label.replace(" native smoke", "")}`);
+    skip(label, `requires ${label.replace(" native smoke", "")}`, { lenient: true });
   }
 }
 
@@ -240,7 +237,6 @@ if (commandAvailable("bun", ["--version"])) {
   run("Bun example dependency install", "bun", ["install", "--cwd", exampleDir, "--frozen-lockfile"]);
   runJsTask("Bun example typecheck", "example-typecheck");
   runJsTask("Bun adapter tests", "test:bun");
-  runJsTask("Bun @apply and incremental smoke", "test:bun");
   run("Bun fullstack example verify", "bun", [join(exampleDir, "src", "verify.ts")], { cwd: exampleDir });
   run("Bun fullstack production build", "bun", [join(exampleDir, "src", "production-build.ts")], { cwd: exampleDir });
 } else {
@@ -250,6 +246,15 @@ if (commandAvailable("bun", ["--version"])) {
 }
 
 console.log("");
+if (strict) {
+  for (const result of results) {
+    if (result.status === "SKIP" && !result.lenient) {
+      result.status = "FAIL";
+      failures += 1;
+      console.error(`FAIL ${result.label} (required gate skipped in --strict mode: ${result.reason})`);
+    }
+  }
+}
 console.log(`RESULT: ${failures === 0 ? "local checks completed without failures" : `${failures} check(s) failed`}`);
 if (results.some((result) => result.status === "SKIP")) {
   console.log("Skipped checks are not release evidence for the skipped surface.");

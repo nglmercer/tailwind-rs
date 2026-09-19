@@ -1,5 +1,6 @@
 import type { ComponentChildren } from "preact";
 import { useRef } from "preact/hooks";
+import { cn } from "../../lib/cn.ts";
 
 export interface TabItem {
   readonly value: string;
@@ -73,7 +74,7 @@ export function Tabs({ value, onChange, items, variant = "line", size = "md", id
   }
 
   return (
-    <div className={`${variantClasses[variant]} ${sizeClasses[size]}`.trim()} role="tablist" aria-label={ariaLabel}>
+    <div className={cn(variantClasses[variant], sizeClasses[size])} role="tablist" aria-label={ariaLabel}>
       {items.map((item, index) => {
         const selected = item.value === value;
         const id = `${prefix}-tab-${safeId(item.value)}`;
@@ -90,7 +91,7 @@ export function Tabs({ value, onChange, items, variant = "line", size = "md", id
             aria-disabled={item.disabled || undefined}
             tabIndex={selected ? 0 : -1}
             disabled={item.disabled}
-            className={`tab ${selected ? "tab-active" : ""}`.trim()}
+            className={cn("tab", selected && "tab-active")}
             onClick={() => onChange(item.value)}
             onKeyDown={event => {
               if (event.key === "ArrowRight" || event.key === "ArrowDown") {

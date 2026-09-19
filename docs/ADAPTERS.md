@@ -83,7 +83,7 @@ The plugin MUST:
 - normalize file URLs, `/@fs/` IDs, separators, queries, and real paths;
 - fail builds for compiler errors and expose warnings with their structured source information;
 - support opt-in `debug` lifecycle logs that identify failed HMR rebuilds and the retained
-  last-successful bundle, with source locations and code frames where source text is available;
+  last-successful bundle, with source locations where source text is available;
 - regenerate CSS from the current module graph so deleted modules cannot leave stale utilities;
 - transform imported `.css` files through the native stylesheet API and report `@apply` diagnostics;
 - rely on `Bun.serve({ development: { hmr: true } })` for frontend graph/HMR behavior in development;
@@ -108,10 +108,14 @@ Preferred options:
 
 Avoid making Deno support dependent on Node globals.
 
-The WASM `updateSource` method is intentionally a language-agnostic scanner surface. Hosts that
-already parse JavaScript-family or framework source SHOULD call the generated
-`updateSourceWithCandidates` method with exact source spans; this keeps WASM candidate selection
-aligned with the native AST/framework adapters.
+The WASM compiler (`WasmCompiler`) mirrors the N-API adapter surface: the constructor accepts an
+optional `pretty`/`configSource`/`browserTarget` triple, `updateSource` and `transformStylesheet`
+take an optional host-language `path`, and `extractCandidates` runs the same SWC/framework dispatch
+as native extraction. `build()` returns `{ css, diagnostics, stats }` with N-API-matching camel-case
+counters. Introspection payloads (`explain`, `validate`, `capabilities`) are JSON strings in both
+adapters; hosts `JSON.parse` one stable encoding. Hosts that already parse JavaScript-family or
+framework source SHOULD call `updateSourceWithCandidates` with exact source spans. Method names are
+camelCase (`updateSource`, `removeSource`) on both sides.
 
 ## Vite
 
@@ -124,13 +128,11 @@ The Vite adapter should:
 - preserve source errors,
 - keep dev and build semantics aligned.
 
-Potential virtual module:
+The virtual module is:
 
 ```text
 virtual:utilitycss.css
 ```
-
-or a transform based on a CSS entry directive.
 
 The plugin should avoid rescanning the full project on every HMR update.
 
@@ -169,16 +171,13 @@ It should be implemented as an adapter around the compiler, not as the canonical
 
 ## Adapter conformance tests
 
-Every adapter must pass the same behavior fixtures:
-
-- input candidates,
-- config,
-- expected diagnostics,
-- expected CSS.
-
-The Rust conformance fixtures live under `crates/utilitycss-compiler/tests/fixtures`. Native Node
-smoke coverage is run after a platform N-API build; the regular JavaScript tests use injectable
-fakes so they remain runnable without a native binary.
+The canonical behavior fixtures are the Rust conformance suite under
+`crates/utilitycss-compiler/tests/fixtures`: input candidates, config, expected diagnostics, and
+expected CSS. That suite pins compiler semantics; the JavaScript adapters do not execute it
+directly. Instead, adapter behavior is pinned per adapter: native Node smoke coverage runs after a
+platform N-API build, while the regular JavaScript tests use injectable fakes so they remain
+runnable without a native binary. A shared cross-adapter fixture runner MAY be added later; until
+then, adapter changes MUST extend the adapter's own tests.
 
 The Bun package additionally tests HTML links, JavaScript and TSX module extraction, source
 replacement, deleted-source invalidation, diagnostics, deterministic output, and packed-artifact
@@ -200,3 +199,7 @@ Prefer versioned transport structs where needed.
 Compiler instances should be reusable and explicitly disposable by hosts.
 
 Adapters should avoid hidden process-global singleton compilers.
+
+The Node adapter's `dispose()` releases the native handle and blocks further use; every later call
+throws. N-API instances are otherwise garbage-collected, so the native binding exposes no explicit
+dispose entry point. WASM instances are released with the wasm-bindgen-generated `free()`.

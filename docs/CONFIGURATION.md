@@ -91,7 +91,8 @@ before compilation. The active preset is included in compiler provenance and cap
 `browserTarget` accepts `modern`, `evergreen`, `safari-15`, or `legacy`. The compiler keeps the
 generated CSS deterministic and reports unsupported modern features as structured warnings. The
 target participates in configuration fingerprints so changing browser policy invalidates cached
-semantic results.
+semantic results. `safari-15` pins Safari 15.0 (September 2021) as the 15.x series floor; see
+`COMPATIBILITY.md` for the per-feature support table.
 
 The CLI `watch` command watches the file supplied through `--config` and reloads a valid change
 without restarting. If a changed configuration is invalid, the watcher reports the diagnostic and

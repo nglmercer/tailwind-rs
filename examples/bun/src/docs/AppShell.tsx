@@ -2,6 +2,7 @@ import type { ComponentChildren } from "preact";
 
 import type { Category } from "../catalog.ts";
 import { catalog } from "../catalog.ts";
+import { cn } from "../lib/cn.ts";
 import { CategoryTabs } from "./CategoryTabs.tsx";
 import { ComponentSearch } from "./ComponentSearch.tsx";
 
@@ -37,7 +38,7 @@ export function AppShell({ activeCategory, searchQuery, searchResultCount, onCat
         </div>
       </header>
       {children}
-      <footer className="site-footer page-width px-4">
+      <footer className={cn("site-footer page-width px-4", "xs:tracking-wide 2xl:text-base content-auto")}>
         <span>utilitycss / bun example</span>
         <span>Deterministic CSS · Bun + Preact</span>
       </footer>

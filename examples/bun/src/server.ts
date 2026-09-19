@@ -1,4 +1,5 @@
 import homepage from "./index.html";
+import { handleCompileRequest } from "./lab/route.ts";
 
 const port = Number(process.env.PORT ?? 3000);
 const development = process.env.NODE_ENV !== "production";
@@ -6,7 +7,8 @@ const development = process.env.NODE_ENV !== "production";
 const server = Bun.serve({
   port,
   routes: {
-    "/": homepage
+    "/": homepage,
+    "/api/compile": handleCompileRequest
   },
   development: development
     ? {

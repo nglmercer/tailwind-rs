@@ -13,6 +13,7 @@
     "smoke:packed-bun": "node scripts/smoke-packed-bun.mjs",
     "smoke:vite": "node scripts/vite-build-smoke.mjs",
     "release:check": "node scripts/release-check.mjs",
+    "release:check:strict": "node scripts/release-check.mjs --strict",
     "test:bun": "node scripts/js-tasks.mjs test:bun",
     "lint": "node scripts/js-tasks.mjs lint",
     "test": "node scripts/js-tasks.mjs test",

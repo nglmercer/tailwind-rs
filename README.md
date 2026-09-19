@@ -21,7 +21,7 @@ for a local checkout until a 1.0 release.
 
 - **Rust** stable, edition 2021, MSRV **1.88**
 - **Node.js** 20+ (npm is the workspace package manager; every root script also runs under `bun run`)
-- **Bun** 1.2+ only if you run the Bun adapter or [`examples/bun`](./examples/bun/)
+- **Bun** 1.4+ only if you run the Bun adapter or [`examples/bun`](./examples/bun/)
 - A C toolchain for N-API native builds (`gcc`/`clang` on Linux, Xcode CLT on macOS, MSVC on Windows)
 - **LLVM `lld-link`** on Windows (the workspace's configured linker, see [`.cargo/config.toml`](./.cargo/config.toml)): `winget install -e --id LLVM.LLVM`, with "Add LLVM to the system PATH" selected
 
@@ -324,7 +324,7 @@ Start with [`LLMS.md`](./LLMS.md) for agent guidance, [`docs/VISION.md`](./docs/
 - [`README.md`](./README.md) — project overview, getting started, and documentation index.
 - [`AGENTS.md`](./AGENTS.md) — repository rules for contributors and coding agents.
 - [`LLMS.md`](./LLMS.md) — instructions and priorities for autonomous coding agents.
-- [`MANIFEST.json`](./MANIFEST.json) — machine-readable inventory of the repository documentation.
+- [`MANIFEST.json`](./MANIFEST.json) — machine-readable inventory of git-tracked repository files (see its `manifest_scope`; freshness is enforced by `scripts/repo-consistency.test.mjs`).
 
 ### Product and compiler design
 

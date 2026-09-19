@@ -3270,20 +3270,48 @@ fn radius_declarations(edge: SpacingEdge, value: String, important: bool) -> Vec
 }
 
 /// Escapes a candidate as a CSS class selector.
+///
+/// Serialization follows the CSS Syntax identifier rules (the same algorithm
+/// as `CSS.escape`): a leading digit becomes a hexadecimal code-point escape,
+/// a lone leading `-` is backslash-escaped, a digit after a leading `-` is
+/// code-point escaped, NULL becomes the replacement character, other control
+/// characters become code-point escapes, ASCII punctuation is
+/// backslash-escaped, and every other character (including non-ASCII) is
+/// emitted literally.
 #[must_use]
 pub fn escape_class_selector(candidate: &str) -> String {
     let mut selector = String::from(".");
-    for character in candidate.chars() {
-        if character.is_alphanumeric() || matches!(character, '-' | '_' | '\u{80}'..='\u{10ffff}') {
+    let mut chars = candidate.chars().peekable();
+    let mut index = 0usize;
+    while let Some(character) = chars.next() {
+        if character == '\0' {
+            selector.push(char::REPLACEMENT_CHARACTER);
+        } else if (index == 0 && character.is_ascii_digit())
+            || (index == 1 && character.is_ascii_digit() && candidate.starts_with('-'))
+        {
+            push_code_point_escape(&mut selector, character);
+        } else if index == 0 && character == '-' && chars.peek().is_none() {
+            selector.push_str("\\-");
+        } else if character.is_alphanumeric()
+            || character == '-'
+            || character == '_'
+            || !character.is_ascii()
+        {
             selector.push(character);
         } else if character.is_ascii_control() {
-            selector.push_str(&format!("\\{:x} ", character as u32));
+            push_code_point_escape(&mut selector, character);
         } else {
             selector.push('\\');
             selector.push(character);
         }
+        index += 1;
     }
     selector
+}
+
+fn push_code_point_escape(selector: &mut String, character: char) {
+    selector.push('\\');
+    selector.push_str(&format!("{:x} ", character as u32));
 }
 
 #[cfg(test)]
@@ -3428,6 +3456,36 @@ mod tests {
     #[test]
     fn escapes_css_punctuation() {
         assert_eq!(escape_class_selector("md:hover:bg-red-500/50"), r".md\:hover\:bg-red-500\/50");
+    }
+
+    #[test]
+    fn escapes_leading_digit_breakpoints() {
+        assert_eq!(escape_class_selector("2xl:p-4"), r".\32 xl\:p-4");
+        assert_eq!(escape_class_selector("2xl:grid"), r".\32 xl\:grid");
+        assert_eq!(escape_class_selector("2xl"), r".\32 xl");
+    }
+
+    #[test]
+    fn escapes_lone_dash_and_dash_digit_starts() {
+        assert_eq!(escape_class_selector("-"), r".\-");
+        assert_eq!(escape_class_selector("-2x"), r".-\32 x");
+        assert_eq!(escape_class_selector("-md:p-4"), r".-md\:p-4");
+    }
+
+    #[test]
+    fn escapes_control_and_null_characters() {
+        assert_eq!(escape_class_selector("a\x01b"), ".a\\1 b");
+        let nul_escaped = escape_class_selector("a\0b");
+        assert!(nul_escaped.starts_with(".a"));
+        assert_eq!(nul_escaped.chars().nth(2), Some(char::REPLACEMENT_CHARACTER));
+        assert!(nul_escaped.ends_with("b"));
+        assert_eq!(escape_class_selector("a\x7fb"), ".a\\7f b");
+    }
+
+    #[test]
+    fn preserves_non_ascii_identifier_characters() {
+        assert_eq!(escape_class_selector("café"), ".café");
+        assert_eq!(escape_class_selector("日本語"), ".日本語");
     }
 
     #[test]

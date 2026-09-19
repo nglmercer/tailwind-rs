@@ -282,6 +282,243 @@ test("removes deleted sources from Rollup watcher notifications", () => {
   assert.deepEqual(removed, ["src/removed.html"]);
 });
 
+test("reports non-CSS HMR diagnostics and recovers after invalid HTML is fixed", async () => {
+  const errors = [];
+  const sources = new Map();
+  let invalidated = 0;
+  const stats = {
+    sourcesScanned: 1,
+    bytesScanned: 1,
+    candidatesFound: 1,
+    uniqueCandidates: 1,
+    candidatesParsed: 1,
+    cacheHits: 0,
+    rulesGenerated: 1,
+    rulesRemoved: 0
+  };
+  class FakeNativeCompiler {
+    updateSource(id, content) {
+      sources.set(id, content);
+    }
+    removeSource(id) {
+      return sources.delete(id);
+    }
+    build() {
+      const invalid = [...sources.entries()].find(([, content]) => content.includes("p-[]"));
+      if (invalid) {
+        return {
+          css: ".p-4{padding:1rem;}",
+          diagnostics: [{
+            severity: "error",
+            code: "utility.unknown",
+            message: `unknown utility in ${invalid[0]}`,
+            source: invalid[0],
+            start: 12,
+            end: 16
+          }],
+          stats
+        };
+      }
+      return { css: ".p-4{padding:1rem;}", diagnostics: [], stats };
+    }
+  }
+
+  const plugin = utilitycss({ native: FakeNativeCompiler });
+  const server = {
+    moduleGraph: {
+      getModuleById: async () => ({ id: "\u0000virtual:utilitycss.css" }),
+      invalidateModule: () => {
+        invalidated += 1;
+      }
+    },
+    config: { logger: { warn: () => {}, error: (message) => errors.push(message) } }
+  };
+  const update = (content) => plugin.handleHotUpdate({
+    file: "src/app.html",
+    event: { type: "update" },
+    modules: [],
+    read: async () => content,
+    server
+  });
+
+  await assert.rejects(() => update('<div class="p-[]"></div>'), /unknown utility in src\/app\.html/);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /utility\.unknown/);
+
+  await update('<div class="p-4"></div>');
+  assert.equal(invalidated, 1);
+});
+
+test("reports non-CSS HMR diagnostics and recovers after invalid TSX is fixed", async () => {
+  const errors = [];
+  const sources = new Map();
+  let invalidated = 0;
+  const stats = {
+    sourcesScanned: 1,
+    bytesScanned: 1,
+    candidatesFound: 1,
+    uniqueCandidates: 1,
+    candidatesParsed: 1,
+    cacheHits: 0,
+    rulesGenerated: 1,
+    rulesRemoved: 0
+  };
+  class FakeNativeCompiler {
+    updateSource(id, content) {
+      sources.set(id, content);
+    }
+    removeSource(id) {
+      return sources.delete(id);
+    }
+    build() {
+      const invalid = [...sources.entries()].find(([, content]) => content.includes("bg-reed-500"));
+      if (invalid) {
+        return {
+          css: "",
+          diagnostics: [{
+            severity: "error",
+            code: "utility.unknown",
+            message: `unknown utility in ${invalid[0]}`,
+            source: invalid[0],
+            start: 0,
+            end: 11
+          }],
+          stats
+        };
+      }
+      return { css: ".p-4{padding:1rem;}", diagnostics: [], stats };
+    }
+  }
+
+  const plugin = utilitycss({ native: FakeNativeCompiler });
+  const server = {
+    moduleGraph: {
+      getModuleById: async () => ({ id: "\u0000virtual:utilitycss.css" }),
+      invalidateModule: () => {
+        invalidated += 1;
+      }
+    },
+    config: { logger: { warn: () => {}, error: (message) => errors.push(message) } }
+  };
+  const update = (content) => plugin.handleHotUpdate({
+    file: "src/app.tsx",
+    event: { type: "update" },
+    modules: [],
+    read: async () => content,
+    server
+  });
+
+  await assert.rejects(() => update('<div className="bg-reed-500" />'), /unknown utility in src\/app\.tsx/);
+  assert.equal(errors.length, 1);
+
+  await update('<div className="p-4" />');
+  assert.equal(invalidated, 1);
+});
+
+test("refuses to load CSS while compiler errors are unresolved", () => {
+  const stats = {
+    sourcesScanned: 0,
+    bytesScanned: 0,
+    candidatesFound: 0,
+    uniqueCandidates: 0,
+    candidatesParsed: 0,
+    cacheHits: 0,
+    rulesGenerated: 0,
+    rulesRemoved: 0
+  };
+  class ErrorNativeCompiler {
+    updateSource() {}
+    removeSource() {
+      return false;
+    }
+    build() {
+      return {
+        css: ".p-4{padding:1rem;}",
+        diagnostics: [{
+          severity: "error",
+          code: "utility.unknown",
+          message: "unknown utility `nope`",
+          source: "src/app.html",
+          start: 12,
+          end: 16
+        }],
+        stats
+      };
+    }
+  }
+  class WarningNativeCompiler extends ErrorNativeCompiler {
+    build() {
+      const result = super.build();
+      return {
+        ...result,
+        diagnostics: result.diagnostics.map((diagnostic) => ({ ...diagnostic, severity: "warning" }))
+      };
+    }
+  }
+
+  assert.throws(
+    () => utilitycss({ native: ErrorNativeCompiler }).load("\u0000virtual:utilitycss.css"),
+    /unknown utility `nope`/
+  );
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (message) => warnings.push(message);
+  try {
+    assert.equal(
+      utilitycss({ native: WarningNativeCompiler }).load("\u0000virtual:utilitycss.css"),
+      ".p-4{padding:1rem;}"
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /utility\.unknown/);
+});
+
+test("includes .htm sources like .html", async () => {
+  const updates = [];
+  class FakeNativeCompiler {
+    updateSource(id, content, path) {
+      updates.push([id, content, path]);
+    }
+    removeSource() {
+      return false;
+    }
+    build() {
+      return {
+        css: "",
+        diagnostics: [],
+        stats: {
+          sourcesScanned: 0,
+          bytesScanned: 0,
+          candidatesFound: 0,
+          uniqueCandidates: 0,
+          candidatesParsed: 0,
+          cacheHits: 0,
+          rulesGenerated: 0,
+          rulesRemoved: 0
+        }
+      };
+    }
+  }
+
+  const plugin = utilitycss({ native: FakeNativeCompiler });
+  await plugin.transform.call(
+    { warn: () => {}, error: () => { throw new Error("unexpected error"); } },
+    "<div />",
+    "src/partial.htm"
+  );
+  await plugin.transform.call(
+    { warn: () => {}, error: () => { throw new Error("unexpected error"); } },
+    "<div />",
+    "src/upper.HTM"
+  );
+  assert.deepEqual(updates, [
+    ["src/partial.htm", "<div />", "src/partial.htm"],
+    ["src/upper.HTM", "<div />", "src/upper.HTM"]
+  ]);
+});
+
 test("forwards compiler diagnostics to the Vite hook context", async () => {
   const warnings = [];
   class FakeNativeCompiler {

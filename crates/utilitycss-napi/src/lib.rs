@@ -206,6 +206,7 @@ impl Compiler {
                 .map(|candidate| (candidate.raw(), candidate.span(), ExtractionMode::Ast))
                 .collect::<Vec<_>>(),
             SourceKind::Framework(framework) => extract_for_framework(&content, framework)
+                .map_err(|error| Error::new(Status::InvalidArg, error.to_string()))?
                 .into_iter()
                 .map(|candidate| (candidate.raw(), candidate.span(), ExtractionMode::Static))
                 .collect(),

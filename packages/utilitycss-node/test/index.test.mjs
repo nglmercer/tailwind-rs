@@ -97,3 +97,69 @@ test("normalizes the native stylesheet transformation result", () => {
     help: "fixture help"
   }]);
 });
+
+test("dispose releases the native handle and blocks further use", () => {
+  const calls = [];
+  class FakeNativeCompiler {
+    updateSource() {
+      calls.push("updateSource");
+    }
+    extractCandidates() {
+      calls.push("extractCandidates");
+      return [];
+    }
+    removeSource() {
+      calls.push("removeSource");
+      return true;
+    }
+    build() {
+      calls.push("build");
+      return {
+        css: "",
+        diagnostics: [],
+        stats: {
+          sourcesScanned: 0,
+          bytesScanned: 0,
+          candidatesFound: 0,
+          uniqueCandidates: 0,
+          candidatesParsed: 0,
+          cacheHits: 0,
+          rulesGenerated: 0,
+          rulesRemoved: 0
+        }
+      };
+    }
+    explain() {
+      calls.push("explain");
+      return {};
+    }
+    validate() {
+      calls.push("validate");
+      return {};
+    }
+    capabilities() {
+      calls.push("capabilities");
+      return {};
+    }
+    transformStylesheet() {
+      calls.push("transformStylesheet");
+      return { css: "", diagnostics: [] };
+    }
+  }
+
+  const compiler = createCompiler({ native: FakeNativeCompiler });
+  compiler.updateSource("src/app.html", "flex", "src/app.html", []);
+  compiler.dispose();
+  compiler.dispose();
+
+  assert.equal(compiler.native, undefined);
+  assert.throws(() => compiler.updateSource("src/app.html", "flex"), /has been disposed/);
+  assert.throws(() => compiler.removeSource("src/app.html"), /has been disposed/);
+  assert.throws(() => compiler.extractCandidates("flex"), /has been disposed/);
+  assert.throws(() => compiler.build(), /has been disposed/);
+  assert.throws(() => compiler.explain("p-4"), /has been disposed/);
+  assert.throws(() => compiler.validate("p-4"), /has been disposed/);
+  assert.throws(() => compiler.capabilities(), /has been disposed/);
+  assert.throws(() => compiler.transformStylesheet("a.css", "b"), /has been disposed/);
+  assert.deepEqual(calls, ["updateSource"]);
+});

@@ -5,6 +5,9 @@
   "license": "MIT OR Apache-2.0",
   "repository": "https://github.com/nglmercer/tailwind-rs",
   "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {

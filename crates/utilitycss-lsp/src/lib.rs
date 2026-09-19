@@ -223,10 +223,47 @@ fn lsp_diagnostic_message(diagnostic: &utilitycss_diagnostics::Diagnostic) -> St
     message
 }
 
+/// Extraction failures from either the SWC or framework extractor.
+#[derive(Debug)]
+enum LspExtractionError {
+    Swc(utilitycss_swc::ExtractionError),
+    Framework(utilitycss_extractor::ExtractionError),
+}
+
+impl LspExtractionError {
+    fn offset(&self) -> Option<u32> {
+        match self {
+            Self::Swc(error) => error.offset(),
+            Self::Framework(_) => None,
+        }
+    }
+}
+
+impl std::fmt::Display for LspExtractionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Swc(error) => write!(formatter, "{error}"),
+            Self::Framework(error) => write!(formatter, "{error}"),
+        }
+    }
+}
+
+impl From<utilitycss_swc::ExtractionError> for LspExtractionError {
+    fn from(error: utilitycss_swc::ExtractionError) -> Self {
+        Self::Swc(error)
+    }
+}
+
+impl From<utilitycss_extractor::ExtractionError> for LspExtractionError {
+    fn from(error: utilitycss_extractor::ExtractionError) -> Self {
+        Self::Framework(error)
+    }
+}
+
 fn extract_candidates(
     uri: &Url,
     content: &str,
-) -> std::result::Result<Vec<CandidateInput>, utilitycss_swc::ExtractionError> {
+) -> std::result::Result<Vec<CandidateInput>, LspExtractionError> {
     match file_kind(uri.path()) {
         FileKind::JavaScript(kind) => Ok(extract_swc(content, kind)?
             .into_iter()
@@ -235,7 +272,7 @@ fn extract_candidates(
                     .with_extraction_mode(ExtractionMode::Ast)
             })
             .collect()),
-        FileKind::Framework(framework) => Ok(extract_for_framework(content, framework)
+        FileKind::Framework(framework) => Ok(extract_for_framework(content, framework)?
             .into_iter()
             .map(|candidate| {
                 CandidateInput::new(candidate.raw(), candidate.span())

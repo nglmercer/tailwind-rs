@@ -107,7 +107,7 @@ pub fn extract_with_mode(
             .into_iter()
             .map(|token| ExtractedCandidate::with_mode(token.raw(), token.span(), mode))
             .collect()),
-        ExtractionMode::Static => Ok(extract_for_framework(source, framework)
+        ExtractionMode::Static => Ok(extract_for_framework(source, framework)?
             .into_iter()
             .map(|candidate| ExtractedCandidate::with_mode(candidate.raw(), candidate.span(), mode))
             .collect()),
@@ -140,11 +140,14 @@ pub fn extract_with_mode(
 ///
 /// The result preserves scanner order and duplicate occurrences. Dynamic template strings and
 /// unrelated string literals are intentionally ignored.
-#[must_use]
-pub fn extract(source: &str) -> Vec<ExtractedCandidate<'_>> {
-    if validate_source_len(source.len()).is_err() {
-        return Vec::new();
-    }
+///
+/// # Errors
+///
+/// Returns [`ExtractionError::SourceTooLarge`] when the source exceeds the representable size
+/// limit, so oversized inputs are never mistaken for sources without candidates.
+pub fn extract(source: &str) -> Result<Vec<ExtractedCandidate<'_>>, ExtractionError> {
+    validate_source_len(source.len())
+        .map_err(|_: SourceSizeError| ExtractionError::SourceTooLarge)?;
     let mut ranges = attribute_ranges(source);
     ranges.extend(helper_string_ranges(source));
     normalize_ranges(&mut ranges);
@@ -154,7 +157,7 @@ pub fn extract(source: &str) -> Vec<ExtractedCandidate<'_>> {
     let mut range_index = 0;
     let mut comment_index = 0;
 
-    scan(source)
+    Ok(scan(source)
         .into_iter()
         .filter(|token| {
             let start = usize::try_from(token.span().start()).unwrap_or(usize::MAX);
@@ -164,7 +167,7 @@ pub fn extract(source: &str) -> Vec<ExtractedCandidate<'_>> {
                 && contains_ordered_range(&ranges, &mut range_index, &candidate)
         })
         .map(|token| ExtractedCandidate::new(token.raw(), token.span()))
-        .collect()
+        .collect::<Vec<_>>())
 }
 
 /// Extracts candidates using the static class forms of a supported framework template.
@@ -172,12 +175,18 @@ pub fn extract(source: &str) -> Vec<ExtractedCandidate<'_>> {
 /// This supplements [`extract`] with Vue `:class`/`v-bind:class` literals, Svelte `class:`
 /// directives, and Astro `class:list` expressions. It deliberately does not evaluate bindings;
 /// only source literals and directive names are returned.
-#[must_use]
-pub fn extract_for_framework(source: &str, framework: Framework) -> Vec<ExtractedCandidate<'_>> {
-    if validate_source_len(source.len()).is_err() {
-        return Vec::new();
-    }
-    let mut candidates = extract(source);
+///
+/// # Errors
+///
+/// Returns [`ExtractionError::SourceTooLarge`] when the source exceeds the representable size
+/// limit, so oversized inputs are never mistaken for sources without candidates.
+pub fn extract_for_framework(
+    source: &str,
+    framework: Framework,
+) -> Result<Vec<ExtractedCandidate<'_>>, ExtractionError> {
+    validate_source_len(source.len())
+        .map_err(|_: SourceSizeError| ExtractionError::SourceTooLarge)?;
+    let mut candidates = extract(source)?;
     let ranges = match framework {
         Framework::Html => Vec::new(),
         Framework::Vue => vue_ranges(source),
@@ -226,7 +235,7 @@ pub fn extract_for_framework(source: &str, framework: Framework) -> Vec<Extracte
         }
     }
     candidates.sort_by_key(|candidate| (candidate.span().start(), candidate.span().end()));
-    candidates
+    Ok(candidates)
 }
 
 fn normalize_ranges(ranges: &mut Vec<Range<usize>>) {
@@ -644,7 +653,11 @@ mod tests {
     use super::{extract, extract_for_framework, extract_with_mode, Framework};
 
     fn raws(source: &str) -> Vec<&str> {
-        extract(source).into_iter().map(|candidate| candidate.raw()).collect()
+        extract(source)
+            .expect("fixture fits")
+            .into_iter()
+            .map(|candidate| candidate.raw())
+            .collect()
     }
 
     #[test]
@@ -671,7 +684,11 @@ mod tests {
     #[test]
     fn preserves_exact_source_spans() {
         let source = r#"<div className='hover:bg-red-500/50'></div>"#;
-        let candidate = extract(source).into_iter().next().expect("candidate is present");
+        let candidate = extract(source)
+            .expect("fixture fits")
+            .into_iter()
+            .next()
+            .expect("candidate is present");
 
         let start = usize::try_from(candidate.span().start()).expect("span fits");
         let end = usize::try_from(candidate.span().end()).expect("span fits");
@@ -682,7 +699,7 @@ mod tests {
     fn ignores_dynamic_template_attributes() {
         let source = r#"<div className={`p-${size} text-red-500`}></div>"#;
 
-        assert!(extract(source).is_empty());
+        assert!(extract(source).expect("fixture fits").is_empty());
     }
 
     #[test]
@@ -702,6 +719,7 @@ mod tests {
 
         assert_eq!(
             extract_for_framework(source, Framework::Vue)
+                .expect("fixture fits")
                 .into_iter()
                 .map(|candidate| candidate.raw())
                 .collect::<Vec<_>>(),
@@ -715,6 +733,7 @@ mod tests {
 
         assert_eq!(
             extract_for_framework(source, Framework::Svelte)
+                .expect("fixture fits")
                 .into_iter()
                 .map(|candidate| candidate.raw())
                 .collect::<Vec<_>>(),
@@ -728,6 +747,7 @@ mod tests {
 
         assert_eq!(
             extract_for_framework(source, Framework::Astro)
+                .expect("fixture fits")
                 .into_iter()
                 .map(|candidate| candidate.raw())
                 .collect::<Vec<_>>(),
@@ -741,6 +761,7 @@ mod tests {
 
         assert_eq!(
             extract_for_framework(source, Framework::Vue)
+                .expect("fixture fits")
                 .into_iter()
                 .map(|candidate| candidate.raw())
                 .collect::<Vec<_>>(),
@@ -772,13 +793,13 @@ mod tests {
     fn ignores_class_attribute_lookalikes_in_script_text() {
         let source = r#"const className = "flex"; const title = "p-4";"#;
 
-        assert!(extract(source).is_empty());
+        assert!(extract(source).expect("fixture fits").is_empty());
     }
 
     #[test]
     fn avoids_obvious_shadowed_text_helper_bindings() {
         let source = r#"function cn(value) { return value; } cn("flex");"#;
 
-        assert!(extract(source).is_empty());
+        assert!(extract(source).expect("fixture fits").is_empty());
     }
 }

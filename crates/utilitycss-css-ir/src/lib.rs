@@ -25,7 +25,9 @@ pub enum BrowserTarget {
     Modern,
     /// Evergreen browser releases suitable for normal production output.
     Evergreen,
-    /// A Safari 15-era target with selected newer features unavailable.
+    /// Safari 15.0 (September 2021), the 15.x series floor: every tracked
+    /// feature newer than 15.0 reports unsupported, including features added
+    /// in later 15.x releases such as `oklch()` and unprefixed masking (15.4).
     Safari15,
     /// A conservative legacy target that accepts only broadly established CSS features.
     Legacy,
@@ -56,13 +58,24 @@ impl BrowserTarget {
     }
 
     /// Returns whether this target is expected to support a CSS feature.
+    ///
+    /// Safari 15 floors are verified against MDN browser-compat-data:
+    /// `oklch()` and unprefixed masking stabilized in 15.4, `color-mix()` in
+    /// 16.2, `light-dark()` in 17.5, `content-visibility` and unprefixed
+    /// `backdrop-filter` in 18.0, and `field-sizing` in 26.2.
     #[must_use]
     pub const fn supports(self, feature: CssFeature) -> bool {
         match self {
             Self::Modern | Self::Evergreen => true,
             Self::Safari15 => !matches!(
                 feature,
-                CssFeature::ColorMix | CssFeature::LightDark | CssFeature::FieldSizing
+                CssFeature::ColorMix
+                    | CssFeature::LightDark
+                    | CssFeature::Oklch
+                    | CssFeature::ContentVisibility
+                    | CssFeature::FieldSizing
+                    | CssFeature::BackdropFilter
+                    | CssFeature::Masking
             ),
             Self::Legacy => false,
         }
@@ -751,5 +764,27 @@ mod tests {
         assert_eq!(report.unsupported, report.required);
         assert!(!report.is_supported());
         assert_eq!(BrowserTarget::parse("safari-15"), Some(BrowserTarget::Safari15));
+    }
+
+    #[test]
+    fn safari15_support_matches_safari_15_0_floors() {
+        // Floors verified against MDN browser-compat-data for Safari 15.0
+        // (September 2021), the 15.x series floor: oklch()/masking 15.4,
+        // color-mix() 16.2, light-dark() 17.5, content-visibility and
+        // unprefixed backdrop-filter 18.0, field-sizing 26.2.
+        for feature in [
+            CssFeature::ColorMix,
+            CssFeature::LightDark,
+            CssFeature::Oklch,
+            CssFeature::ContentVisibility,
+            CssFeature::FieldSizing,
+            CssFeature::BackdropFilter,
+            CssFeature::Masking,
+        ] {
+            assert!(!BrowserTarget::Safari15.supports(feature), "{feature:?} is newer than 15.0");
+            assert!(BrowserTarget::Modern.supports(feature));
+            assert!(BrowserTarget::Evergreen.supports(feature));
+            assert!(!BrowserTarget::Legacy.supports(feature));
+        }
     }
 }

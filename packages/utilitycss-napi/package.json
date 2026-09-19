@@ -4,6 +4,9 @@
   "description": "Native N-API artifact for utilitycss; produced from the utilitycss-napi Rust crate.",
   "license": "MIT OR Apache-2.0",
   "repository": "https://github.com/nglmercer/tailwind-rs",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "publishConfig": {
     "access": "public"
   },

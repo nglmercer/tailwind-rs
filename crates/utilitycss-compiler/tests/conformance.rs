@@ -1,14 +1,19 @@
 #![allow(missing_docs)]
 
+use std::collections::BTreeMap;
+
 use serde::Deserialize;
 use utilitycss_compiler::{Compiler, CompilerConfig, SourceInput};
 use utilitycss_span::SourceId;
+use utilitycss_theme::ThemeBuilder;
 
 #[derive(Debug, Deserialize)]
 struct Fixture {
     sources: Vec<FixtureSource>,
     expected_css: String,
     expected_diagnostics: Vec<FixtureDiagnostic>,
+    #[serde(default)]
+    breakpoints: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -27,7 +32,11 @@ struct FixtureDiagnostic {
 
 fn run_fixture(input: &str) {
     let fixture: Fixture = serde_json::from_str(input).expect("fixture is valid JSON");
-    let mut compiler = Compiler::new(CompilerConfig::new());
+    let mut builder = ThemeBuilder::new();
+    for (name, value) in &fixture.breakpoints {
+        builder = builder.breakpoint(name, value);
+    }
+    let mut compiler = Compiler::new(CompilerConfig::new().with_theme(builder.build()));
     for source in fixture.sources {
         compiler
             .update_source(SourceInput::new(SourceId::new(source.id), source.content))
@@ -68,4 +77,9 @@ fn duplicate_occurrences_fixture() {
 #[test]
 fn diagnostic_fixture() {
     run_fixture(include_str!("fixtures/diagnostics.json"));
+}
+
+#[test]
+fn leading_digit_escaping_fixture() {
+    run_fixture(include_str!("fixtures/escaping.json"));
 }

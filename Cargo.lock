@@ -1859,6 +1859,7 @@ name = "utilitycss-css-ir"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2021,11 +2022,16 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde-wasm-bindgen",
+ "serde_json",
  "utilitycss-compiler",
+ "utilitycss-config",
  "utilitycss-css-ir",
+ "utilitycss-diagnostics",
+ "utilitycss-extractor",
  "utilitycss-scanner",
  "utilitycss-span",
  "utilitycss-stylesheet",
+ "utilitycss-swc",
  "wasm-bindgen",
 ]
 

@@ -324,19 +324,14 @@ function resolveDependencies(
 ): DependencyResolution {
   const dependencies = new Set<string>();
   let complete = true;
-  const specifiers = [
-    ...source.matchAll(/(?:import\s+(?:[^"'`]*?\s+from\s+|)|export\s+[^"'`]*?\s+from\s+|require\s*\(|import\s*\()\s*["']([^"']+)["']/g),
-    ...source.matchAll(/(?:src|href)\s*=\s*["']([^"']+)["']/gi)
-  ];
-  for (const match of specifiers) {
-    const specifier = match[1];
+  const resolveModuleSpecifier = (specifier: string): void => {
     if (specifier === ignoredSpecifier || /^(?:node|bun):/i.test(specifier)) {
-      continue;
+      return;
     }
     // URLs are resources, not Bun modules. Hash-prefixed specifiers remain eligible because they
     // are a common alias form in Bun/TypeScript projects.
     if (/^(?:[a-z][a-z\d+.-]*:)?\/\//i.test(specifier)) {
-      continue;
+      return;
     }
     try {
       dependencies.add(normalizeModuleId(Bun.resolveSync(specifier, dirname(id))));
@@ -345,8 +340,57 @@ function resolveDependencies(
       // Bun reports unresolved imports through its normal build diagnostics. Until then, retain
       // every observed source so a failed custom resolution cannot remove live CSS.
     }
+  };
+  const resolveAttributeReference = (specifier: string): void => {
+    if (specifier === ignoredSpecifier) {
+      return;
+    }
+    // HTML href/src values are usually fragments, external URLs, or static assets rather than
+    // Bun modules. Only plausible module paths participate in the graph, so one unresolvable
+    // resource reference cannot disable pruning for every observed source.
+    if (isSkippableResourceReference(specifier)) {
+      return;
+    }
+    try {
+      dependencies.add(normalizeModuleId(Bun.resolveSync(specifier, dirname(id))));
+    } catch {
+      complete = false;
+    }
+  };
+  for (
+    const match of source.matchAll(
+      /(?:import\s+(?:[^"'`]*?\s+from\s+|)|export\s+[^"'`]*?\s+from\s+|require\s*\(|import\s*\()\s*["']([^"']+)["']/g
+    )
+  ) {
+    resolveModuleSpecifier(match[1]);
+  }
+  for (const match of source.matchAll(/(?:src|href)\s*=\s*["']([^"']+)["']/gi)) {
+    resolveAttributeReference(match[1]);
   }
   return { dependencies, complete };
+}
+
+const STATIC_RESOURCE_PATTERN =
+  /\.(?:avif|bmp|css|eot|flac|gif|ico|jpe?g|map|mp3|mp4|ogg|ogv|otf|pdf|png|svg|ttf|txt|wav|webm|woff2?|xml)$/i;
+
+/**
+ * Returns whether an HTML href/src value can never be a Bun module: fragments,
+ * external or data URLs, and ordinary static-resource references.
+ */
+function isSkippableResourceReference(specifier: string): boolean {
+  const reference = specifier.trim();
+  if (reference === "" || reference.startsWith("#")) {
+    return true;
+  }
+  const isWindowsPath = /^[a-zA-Z]:[\\/]/.test(reference);
+  if (
+    !isWindowsPath &&
+    (/^[a-z][a-z\d+.-]*:/i.test(reference) || reference.startsWith("//"))
+  ) {
+    return true;
+  }
+  const path = reference.split(/[?#]/, 1)[0] ?? "";
+  return STATIC_RESOURCE_PATTERN.test(path);
 }
 
 function reachableModules(

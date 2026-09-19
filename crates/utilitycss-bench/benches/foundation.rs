@@ -34,8 +34,11 @@ fn benchmark_static_extraction(iterations: u32) {
     let started = Instant::now();
     let mut extracted = 0_u64;
     for _ in 0..iterations {
-        extracted = extracted
-            .wrapping_add(extract_for_framework(black_box(&source), Framework::Html).len() as u64);
+        extracted = extracted.wrapping_add(
+            extract_for_framework(black_box(&source), Framework::Html)
+                .expect("benchmark fixture fits")
+                .len() as u64,
+        );
     }
     println!(
         "static extraction: {iterations} iterations over 2,000 attributes/comments in {:?} (candidates={extracted})",

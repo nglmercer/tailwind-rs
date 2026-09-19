@@ -1,5 +1,6 @@
 import type { ComponentChildren } from "preact";
 import { Icon } from "./Icon.tsx";
+import { cn } from "../lib/cn.ts";
 
 type BadgeVariant = "success" | "warning" | "danger" | "neutral" | "brand" | "info";
 type BadgeSize = "sm" | "md" | "lg";
@@ -16,7 +17,7 @@ const badgeStyles: Record<BadgeVariant, string> = {
 export function Badge({ variant, children, size = "md", withDot = false, dismissible = false, onDismiss }: { variant: BadgeVariant; children: ComponentChildren; size?: BadgeSize; withDot?: boolean; dismissible?: boolean; onDismiss?: () => void }) {
   const sizeClass = size === "sm" ? "badge-sm" : size === "lg" ? "badge-lg" : "";
   return (
-    <span className={`${badgeStyles[variant]} ${sizeClass}`.trim()}>
+    <span className={cn(badgeStyles[variant], sizeClass)}>
       {withDot ? <span className={`badge-dot badge-dot-${variant}`} aria-hidden="true" /> : null}
       {children}
       {dismissible ? <button type="button" aria-label="Dismiss" className="badge-dismiss" onClick={onDismiss}><Icon name="close" className="h-3 w-3" /></button> : null}

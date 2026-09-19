@@ -2,10 +2,36 @@ import { useState } from "preact/hooks";
 import { Icon } from "../ui/Icon.tsx";
 import { cn } from "../../lib/cn.ts";
 
-const columns: readonly { title: string; links: readonly string[] }[] = [
-  { title: "Build", links: ["CLI", "Watch mode", "CI recipes"] },
-  { title: "Integrate", links: ["Bun plugin", "Vite plugin", "Node adapter"] },
-  { title: "Learn", links: ["Class DSL", "Theming", "Migration guide"] }
+interface MegaLink {
+  readonly label: string;
+  readonly href: string;
+}
+
+const columns: readonly { title: string; links: readonly MegaLink[] }[] = [
+  {
+    title: "Components",
+    links: [
+      { label: "Button", href: "#/actions/button" },
+      { label: "Modal", href: "#/actions/modal" },
+      { label: "Card", href: "#/data-display/card" }
+    ]
+  },
+  {
+    title: "Patterns",
+    links: [
+      { label: "Forms", href: "#/data-input/input" },
+      { label: "Menus", href: "#/navigation/menu" },
+      { label: "Tables", href: "#/data-display/table" }
+    ]
+  },
+  {
+    title: "Tools",
+    links: [
+      { label: "Playground", href: "#/tools/compiler-lab" },
+      { label: "Motion", href: "#/tools/motion" },
+      { label: "Dock", href: "#/navigation/dock" }
+    ]
+  }
 ];
 
 /** Navbar entry that opens a full-width multi-column panel. */
@@ -14,17 +40,17 @@ export function MegaMenuDemo() {
   return (
     <div className="megamenu-frame">
       <nav className="megamenu-bar" aria-label="Site">
-        <a className="megamenu-brand" href="#"><span className="brand-mark h-8 w-8 text-sm">u</span>utilitycss</a>
+        <a className="megamenu-brand" href="#/actions/button"><span className="brand-mark h-8 w-8 text-sm">u</span>utilitycss</a>
         <button
           type="button"
           aria-expanded={open}
           onClick={() => setOpen(value => !value)}
           className={cn("megamenu-trigger", open && "megamenu-trigger-open")}
         >
-          Documentation
+          Browse library
           <Icon name="chevron-down" className={cn("h-4 w-4", open && "rotate-180")} />
         </button>
-        <a className="nav-link" href="#">Changelog</a>
+        <a className="nav-link" href="#/data-display/timeline">Changelog</a>
       </nav>
       {open ? (
         <div className="megamenu-panel">
@@ -33,7 +59,7 @@ export function MegaMenuDemo() {
               <p className="megamenu-title">{column.title}</p>
               <ul className="megamenu-links">
                 {column.links.map(link => (
-                  <li key={link}><a href="#">{link}</a></li>
+                  <li key={link.label}><a href={link.href}>{link.label}</a></li>
                 ))}
               </ul>
             </div>

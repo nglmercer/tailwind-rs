@@ -6,7 +6,8 @@ export function IndicatorDemo() {
     <div className="flex flex-wrap items-center gap-8">
       <span className="indicator">
         <span className="avatar">JD</span>
-        <span className="indicator-badge">3</span>
+        <span className="indicator-badge" aria-hidden="true">3</span>
+        <span className="sr-only">3 unread notifications</span>
       </span>
       <span className="indicator">
         <button type="button" className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700">

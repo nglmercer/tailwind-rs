@@ -32,6 +32,7 @@ export function ValidatorDemo() {
         <input
           className={cn("form-input", emailIssue !== null && "form-input-error")}
           type="email"
+          autoComplete="email"
           value={email}
           aria-invalid={emailIssue !== null}
           aria-describedby="validator-email-help"

@@ -15,11 +15,11 @@ export function Accordion({ items = defaultItems }: { items?: Item[] }) {
     <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
       {items.map((item, idx) => (
         <div key={item.title}>
-          <button type="button" aria-expanded={open === idx} className="flex w-full items-center justify-between p-5 text-left font-medium text-gray-700 hover:bg-gray-50" onClick={() => setOpen(open === idx ? -1 : idx)}>
+          <button type="button" id={`accordion-tab-${idx}`} aria-expanded={open === idx} aria-controls={`accordion-panel-${idx}`} className="flex w-full items-center justify-between p-5 text-left font-medium text-gray-700 hover:bg-gray-50" onClick={() => setOpen(open === idx ? -1 : idx)}>
             <span>{item.title}</span>
             <Icon name={open === idx ? "chevron-up" : "chevron-down"} className="h-4 w-4 text-gray-500" />
           </button>
-          {open === idx ? <div className="px-5 pb-5 text-sm leading-relaxed text-gray-500">{item.content}</div> : null}
+          {open === idx ? <div id={`accordion-panel-${idx}`} role="region" aria-labelledby={`accordion-tab-${idx}`} className="px-5 pb-5 text-sm leading-relaxed text-gray-500">{item.content}</div> : null}
         </div>
       ))}
     </div>

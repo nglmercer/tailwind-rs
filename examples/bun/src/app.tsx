@@ -51,7 +51,7 @@ function App() {
           searchQuery={normalizedQuery}
           onNavigate={selectItem}
         />
-        <section className="docs-main" aria-live="polite">
+        <section id="docs-main" className="docs-main" tabIndex={-1} aria-live="polite">
           <ComponentPage item={selectedItem} category={activeCategory} />
         </section>
       </main>

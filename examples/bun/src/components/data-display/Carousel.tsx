@@ -10,9 +10,9 @@ const slides = [
 export function CarouselDemo() {
   const [idx, setIdx] = useState(0);
   return (
-    <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-white">
+    <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-white" role="region" aria-roledescription="carousel" aria-label="Highlights">
       <span className="hidden bg-blue-600 bg-brand-600 bg-gray-800" aria-hidden="true" />
-      <div className={`carousel-slide ${slides[idx].bg}`}>
+      <div className={`carousel-slide ${slides[idx].bg}`} aria-live="polite">
         <span className="text-lg font-semibold">{slides[idx].label}</span>
       </div>
       <button type="button" aria-label="Previous" className="carousel-control carousel-control-prev" onClick={() => setIdx(i => (i - 1 + slides.length) % slides.length)}><Icon name="chevron-right" className="h-5 w-5 rotate-180" /></button>

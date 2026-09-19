@@ -16,7 +16,7 @@ const messages: readonly ChatMessage[] = [
 /** Conversation bubbles with start/end alignment for each participant. */
 export function ChatBubbleDemo() {
   return (
-    <div className="chat-log" aria-label="Conversation">
+    <div className="chat-log" role="log" aria-label="Conversation">
       {messages.map(message => (
         <div key={`${message.author}-${message.time}`} className={cn("chat-row", message.own && "chat-row-own")}>
           <span className="chat-avatar" aria-hidden="true">{message.author.split(" ").map(part => part[0]).join("")}</span>

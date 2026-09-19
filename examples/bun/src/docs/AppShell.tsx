@@ -16,8 +16,13 @@ interface AppShellProps {
 }
 
 export function AppShell({ activeCategory, searchQuery, searchResultCount, onCategoryChange, onSearchChange, children }: AppShellProps) {
+  function skipToContent() {
+    document.getElementById("docs-main")?.focus();
+  }
+
   return (
     <div className="app-shell">
+      <button type="button" className="skip-link" onClick={skipToContent}>Skip to content</button>
       <header className="site-header">
         <div className="page-width docs-header">
           <a className="brand" href="#/actions/button" aria-label="utilitycss component gallery">

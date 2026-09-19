@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { utilitycss } from "../../../packages/utilitycss-bun/src/index.ts";
@@ -24,6 +24,24 @@ for (const category of categoryDefinitions) {
 assert(catalog.filter(item => item.category === "data-input").length >= 10, "data-input should list each control on its own page");
 assert(catalog.filter(item => item.category === "mockup").length >= 4, "mockup should cover browser, code, phone, and window frames");
 assert(catalog.some(item => item.slug === "motion" && item.category === "tools"), "tools should include the motion page");
+
+// Accessibility guard: demo anchors must point at real gallery routes. A bare
+// `href="#"` rewrites the hash and drops the user on the first catalog page,
+// so actions must use buttons and links must carry `#/category/slug` targets.
+function sourceFiles(dir: string): string[] {
+  const files: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...sourceFiles(full));
+    } else if (/\.(tsx?|html)$/.test(entry.name)) {
+      files.push(full);
+    }
+  }
+  return files;
+}
+const deadLinks = sourceFiles(import.meta.dir).filter(file => !file.endsWith("verify.ts") && readFileSync(file, "utf8").includes('href="#"'));
+assert(deadLinks.length === 0, `dead href="#" links found: ${deadLinks.join(", ")}`);
 assert(new Set(slugs).size === slugs.length, "catalog contains duplicate component slugs");
 for (const item of catalog) {
   assert(categoryValues.has(item.category), `catalog item ${item.slug} references an unknown category`);
@@ -133,6 +151,7 @@ assert(css.includes(".list-none{list-style-type:none}"), "list-none utility was 
 assert(css.includes(".animate-fade-in{animation:.5s ease-out both fade-in}"), "fade-in entrance was not emitted");
 assert(css.includes("@keyframes pulse-soft"), "pulse-soft keyframes are missing from the output");
 assert(css.includes("prefers-reduced-motion"), "reduced-motion handling is missing from the output");
+assert(css.includes(".skip-link:focus-visible"), "skip-link reveal styles are missing from the output");
 assert(css.includes("background-color:#4f46e5"), "CSS-first brand token was not resolved");
 assert(css.includes("border-radius"), "common radius utilities were not emitted");
 assert(css.includes("box-shadow"), "common shadow utilities were not emitted");

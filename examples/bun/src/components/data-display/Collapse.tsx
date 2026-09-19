@@ -9,7 +9,9 @@ export function CollapseDemo() {
     <div className="fold-panel">
       <button
         type="button"
+        id="fold-toggle"
         aria-expanded={open}
+        aria-controls="fold-panel"
         onClick={() => setOpen(value => !value)}
         className="fold-toggle"
       >
@@ -18,7 +20,7 @@ export function CollapseDemo() {
         <Icon name="chevron-down" className={cn("fold-chevron", open && "fold-chevron-open")} />
       </button>
       {open ? (
-        <div className="fold-body">
+        <div id="fold-panel" role="region" aria-labelledby="fold-toggle" className="fold-body">
           <p>Use collapse for a single standalone disclosure — shipping details, advanced settings, or one FAQ answer. Reach for accordion when several related panels share one container.</p>
         </div>
       ) : null}

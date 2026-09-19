@@ -121,3 +121,11 @@ Dev builds enable Bun adapter debugging (build number + failed HMR recovery mess
 ## Styling note
 
 Component class names (`button`, `component-card`, `badge`, etc.) are ordinary authored classes whose declarations come from `@apply` and the CSS-first theme. The visual patterns are inspired by common component libraries, but the gallery demonstrates utilitycss's deterministic compiler rather than runtime compatibility with Tailwind, Flowbite, or daisyUI.
+
+## Accessibility
+
+- Skip link, header/main/footer landmarks, one `h1` per page, labeled controls, and `prefers-reduced-motion` support throughout.
+- Modal and drawer trap focus, close on Escape, and return focus to their trigger; dropdown and popover dismiss on Escape and outside pointer.
+- Tabs, rating, switch, progress, timer, log, status, grid, and dialog roles are wired with matching labels, values, and `aria-current` states.
+- Demo anchors always point at real `#/category/slug` routes while actions use buttons, so no interaction dead-ends on `#` and drops the user on the first page.
+- `bun run verify` fails the build if a bare `href="#"` appears anywhere under `src/`.

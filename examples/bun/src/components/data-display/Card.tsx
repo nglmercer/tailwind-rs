@@ -63,7 +63,7 @@ export function HorizontalCardDemo() {
         <span className="text-xs font-semibold uppercase tracking-wider text-brand-700">Flowbite card</span>
         <h3 className="mt-2 text-lg font-semibold text-gray-900">Noteworthy technology acquisitions 2024</h3>
         <p className="mt-2 text-sm leading-relaxed text-gray-600">Here are the biggest enterprise acquisitions this year so far, in chronological order.</p>
-        <a className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-brand-700 hover:text-brand-800" href="#">Read more <Icon name="arrow" className="h-4 w-4" /></a>
+        <a className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-brand-700 hover:text-brand-800" href="#/data-display/card">Read more <Icon name="arrow" className="h-4 w-4" /></a>
       </div>
     </div>
   );

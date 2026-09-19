@@ -1,6 +1,7 @@
 import { Badge } from "./Badge.tsx";
 import { Button } from "../actions/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
+import { cn } from "../../lib/cn.ts";
 
 export function CardDemo() {
   return (
@@ -41,10 +42,10 @@ export function PricingCardDemo() {
         { title: "Pro", price: "$49", features: ["Unlimited projects", "50 GB storage", "Priority support"], cta: "Choose Pro", featured: true },
         { title: "Enterprise", price: "$99", features: ["SAML SSO", "Unlimited storage", "Dedicated support"], cta: "Contact sales", featured: false }
       ].map(card => (
-        <div key={card.title} className={`rounded-lg border p-6 shadow-sm ${card.featured ? "border-brand-600 bg-white shadow-md" : "border-gray-200 bg-white"}`}>
+        <div key={card.title} className={cn("pricing-card", card.featured && "pricing-card-featured")}>
           <h3 className="text-lg font-semibold text-gray-900">{card.title}</h3>
           <p className="mt-2 text-3xl font-bold tracking-tight text-gray-900">{card.price}<span className="text-sm font-normal text-gray-500">/month</span></p>
-          <ul className="mt-6 space-y-2 text-sm text-gray-600">
+          <ul className="mb-0 mt-6 list-none space-y-2 p-0 text-sm text-gray-600">
             {card.features.map(f => <li key={f} className="flex items-center gap-2"><Icon name="check" className="h-4 w-4 text-green-600" />{f}</li>)}
           </ul>
           <Button variant={card.featured ? "primary" : "outline"} className="mt-6 w-full">{card.cta}</Button>

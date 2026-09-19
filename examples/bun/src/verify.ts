@@ -112,6 +112,15 @@ const expectedOutput = [
 ];
 const missing = expectedOutput.filter(fragment => !css.includes(fragment));
 assert(missing.length === 0, `utilitycss output is missing: ${missing.join(", ")}`);
+// Visual-regression proofs: recipes emit border width+color but no style, so a
+// preflight reset is required; the timeline must not show list numerals; the
+// carousel slide carries its own layout (template-literal classes are never
+// extracted); the featured pricing card keeps its brand border via recipes.
+assert(css.includes("border:0 solid"), "border preflight reset is missing from the output");
+assert(css.includes(".timeline{list-style:none"), "timeline list-style reset was not emitted");
+assert(css.includes(".carousel-slide{display:flex"), "carousel slide layout did not move into the recipe");
+assert(css.includes(".pricing-card-featured{border-color:#4f46e5"), "featured pricing border was not emitted");
+assert(css.includes(".list-none{list-style-type:none}"), "list-none utility was not emitted");
 assert(css.includes("background-color:#4f46e5"), "CSS-first brand token was not resolved");
 assert(css.includes("border-radius"), "common radius utilities were not emitted");
 assert(css.includes("box-shadow"), "common shadow utilities were not emitted");

@@ -33,7 +33,7 @@ export function SwapDemo() {
   return (
     <div className="flex flex-wrap items-center gap-6">
       <span className="inline-flex items-center gap-3">
-        <Swap active={favorite} onToggle={() => setFavorite(value => !value)} activeIcon="heart" inactiveIcon="heart" label="Mark as favorite" />
+        <Swap active={favorite} onToggle={() => setFavorite(value => !value)} activeIcon="heart-filled" inactiveIcon="heart" label="Mark as favorite" />
         <span className="text-sm text-gray-600">{favorite ? "Saved to favorites." : "Not saved yet."}</span>
       </span>
       <span className="inline-flex items-center gap-3">

@@ -35,7 +35,8 @@ export type IconName =
   | "send"
   | "copy"
   | "download"
-  | "filter";
+  | "filter"
+  | "heart-filled";
 
 export function Icon({ name, className = "h-5 w-5" }: { name: IconName; className?: string }) {
   const paths: Record<IconName, ComponentChildren> = {
@@ -73,7 +74,8 @@ export function Icon({ name, className = "h-5 w-5" }: { name: IconName; classNam
     send: <path d="m22 2-7 20-4-9-9-4 20-7Z" />,
     copy: <><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></>,
     download: <path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />,
-    filter: <path d="M4 5h16l-6 7v5l-4 2v-7L4 5Z" />
+    filter: <path d="M4 5h16l-6 7v5l-4 2v-7L4 5Z" />,
+    "heart-filled": <path d="M12 21s-6.7-4.2-8.6-8.2A4.5 4.5 0 0 1 12 6c1.5 0 3 .8 3.9 2A4.5 4.5 0 0 1 20.6 13C18.7 16.8 12 21 12 21Z" fill="currentColor" stroke="none" />
   };
   return (
     <svg aria-hidden="true" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">

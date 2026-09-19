@@ -146,7 +146,7 @@ export function CompilerLabPage() {
               Mode
               <select
                 id="lab-mode"
-                className="form-select ml-2"
+                className="form-input form-select ml-2"
                 value={mode}
                 onChange={event => setMode((event.target as HTMLSelectElement).value as LabMode)}
               >
@@ -158,7 +158,7 @@ export function CompilerLabPage() {
               Browser target
               <select
                 id="lab-target"
-                className="form-select ml-2"
+                className="form-input form-select ml-2"
                 value={browserTarget}
                 onChange={event => setBrowserTarget((event.target as HTMLSelectElement).value as BrowserTarget)}
               >

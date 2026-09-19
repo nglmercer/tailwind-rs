@@ -12,7 +12,7 @@ export function CarouselDemo() {
   return (
     <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-white">
       <span className="hidden bg-blue-600 bg-brand-600 bg-gray-800" aria-hidden="true" />
-      <div className={`carousel-slide ${slides[idx].bg} flex h-56 items-center justify-center text-white`}>
+      <div className={`carousel-slide ${slides[idx].bg}`}>
         <span className="text-lg font-semibold">{slides[idx].label}</span>
       </div>
       <button type="button" aria-label="Previous" className="carousel-control carousel-control-prev" onClick={() => setIdx(i => (i - 1 + slides.length) % slides.length)}><Icon name="chevron-right" className="h-5 w-5 rotate-180" /></button>
